@@ -15,6 +15,7 @@ internal sealed class AppSettings
 
     public bool ShowClaude { get; set; } = true;
     public bool ShowCodex { get; set; } = true;
+    public bool ShowCursor { get; set; } = true;
 
     /// Base polling interval for Claude (minutes). Allowed: 5, 10, 30, 60.
     /// Each Claude poll may hit the messages-API fallback, which costs real
