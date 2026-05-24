@@ -57,26 +57,33 @@ public sealed class TrayApplicationContext : ApplicationContext
             out ToolStripMenuItem showClaudeItem,
             out ToolStripMenuItem showCodexItem,
             out ToolStripMenuItem showCursorItem,
-            out ToolStripMenuItem intervalParent);
+            out ToolStripMenuItem intervalParent
+        );
 
         // Frame colors echo the brand icons: Claude = orange, Codex = blue, Cursor = monochrome dark;
         // the shorter window uses the brighter shade, the longer one the deeper shade.
-        _claudeIcons = new ProviderIcons("Claude",
+        _claudeIcons = new ProviderIcons(
+            "Claude",
             new WindowSpec(Color.FromArgb(255, 146, 48), "5h", LongDate: false),
             new WindowSpec(Color.FromArgb(198, 93, 20), "周", LongDate: true),
-            menu);
-        _codexIcons = new ProviderIcons("Codex",
+            menu
+        );
+        _codexIcons = new ProviderIcons(
+            "Codex",
             new WindowSpec(Color.FromArgb(64, 140, 255), "5h", LongDate: false),
             new WindowSpec(Color.FromArgb(30, 85, 200), "周", LongDate: true),
-            menu);
+            menu
+        );
         // Cursor's brand mark is monochrome with a slight cool cast; we use a light
         // and a deep cool slate. Avoid going near pure black — it disappears on
         // dark taskbars. Both pools reset on the monthly billing cycle, so both
         // use the long (MM-dd) date format.
-        _cursorIcons = new ProviderIcons("Cursor",
+        _cursorIcons = new ProviderIcons(
+            "Cursor",
             new WindowSpec(Color.FromArgb(170, 175, 190), "Auto", LongDate: true),
             new WindowSpec(Color.FromArgb(85, 95, 120), "API", LongDate: true),
-            menu);
+            menu
+        );
 
         _anchorIcon = IconRenderer.Render(Color.FromArgb(100, 100, 100), null, isError: true);
         _anchor = new NotifyIcon
@@ -103,9 +110,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         WireIntervalMenu(intervalParent);
         ApplyTimers();
 
-        if (_settings.ShowClaude) _ = RefreshClaudeAsync();
-        if (_settings.ShowCodex) _ = RefreshCodexAsync();
-        if (_settings.ShowCursor) _ = RefreshCursorAsync();
+        if (_settings.ShowClaude)
+            _ = RefreshClaudeAsync();
+        if (_settings.ShowCodex)
+            _ = RefreshCodexAsync();
+        if (_settings.ShowCursor)
+            _ = RefreshCursorAsync();
 
         startupItem.Checked = _settings.RunAtStartup;
         startupItem.Click += (_, _) =>
@@ -125,7 +135,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _claudeIcons.SetVisible(next);
             ApplyTimers();
             UpdateAnchor();
-            if (next) await RefreshClaudeAsync();
+            if (next)
+                await RefreshClaudeAsync();
         };
 
         showCodexItem.Checked = _settings.ShowCodex;
@@ -138,7 +149,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _codexIcons.SetVisible(next);
             ApplyTimers();
             UpdateAnchor();
-            if (next) await RefreshCodexAsync();
+            if (next)
+                await RefreshCodexAsync();
         };
 
         showCursorItem.Checked = _settings.ShowCursor;
@@ -151,7 +163,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _cursorIcons.SetVisible(next);
             ApplyTimers();
             UpdateAnchor();
-            if (next) await RefreshCursorAsync();
+            if (next)
+                await RefreshCursorAsync();
         };
     }
 
@@ -162,21 +175,28 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ApplyTimers()
     {
-        if (_settings.ShowClaude) _claudeTimer.Start();
-        else _claudeTimer.Stop();
+        if (_settings.ShowClaude)
+            _claudeTimer.Start();
+        else
+            _claudeTimer.Stop();
 
-        if (_settings.ShowCodex) _codexTimer.Start();
-        else _codexTimer.Stop();
+        if (_settings.ShowCodex)
+            _codexTimer.Start();
+        else
+            _codexTimer.Stop();
 
-        if (_settings.ShowCursor) _cursorTimer.Start();
-        else _cursorTimer.Stop();
+        if (_settings.ShowCursor)
+            _cursorTimer.Start();
+        else
+            _cursorTimer.Stop();
     }
 
     private void WireIntervalMenu(ToolStripMenuItem intervalParent)
     {
         foreach (ToolStripItem raw in intervalParent.DropDownItems)
         {
-            if (raw is not ToolStripMenuItem item || item.Tag is not int minutes) continue;
+            if (raw is not ToolStripMenuItem item || item.Tag is not int minutes)
+                continue;
             item.Checked = (minutes == _settings.ClaudePollMinutes);
             item.Click += (_, _) =>
             {
@@ -186,7 +206,8 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _claudeRetryCount = 0;
                 _claudeTimer.Interval = _claudeBaseIntervalMs;
                 foreach (ToolStripItem sibling in intervalParent.DropDownItems)
-                    if (sibling is ToolStripMenuItem mi) mi.Checked = ReferenceEquals(mi, item);
+                    if (sibling is ToolStripMenuItem mi)
+                        mi.Checked = ReferenceEquals(mi, item);
             };
         }
     }
@@ -196,7 +217,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         out ToolStripMenuItem showClaudeItem,
         out ToolStripMenuItem showCodexItem,
         out ToolStripMenuItem showCursorItem,
-        out ToolStripMenuItem intervalParent)
+        out ToolStripMenuItem intervalParent
+    )
     {
         var menu = new ContextMenuStrip();
 
@@ -210,7 +232,9 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         intervalParent = new ToolStripMenuItem("Claude 刷新间隔");
         foreach (int min in AllowedClaudeMinutes)
-            intervalParent.DropDownItems.Add(new ToolStripMenuItem(FormatMinutes(min)) { Tag = min });
+            intervalParent.DropDownItems.Add(
+                new ToolStripMenuItem(FormatMinutes(min)) { Tag = min }
+            );
 
         var exitItem = new ToolStripMenuItem("退出");
         exitItem.Click += (_, _) => ExitThread();
@@ -232,20 +256,25 @@ public sealed class TrayApplicationContext : ApplicationContext
     private async Task RefreshAllAsync()
     {
         var tasks = new List<Task>();
-        if (_settings.ShowClaude) tasks.Add(RefreshClaudeAsync());
-        if (_settings.ShowCodex) tasks.Add(RefreshCodexAsync());
-        if (_settings.ShowCursor) tasks.Add(RefreshCursorAsync());
+        if (_settings.ShowClaude)
+            tasks.Add(RefreshClaudeAsync());
+        if (_settings.ShowCodex)
+            tasks.Add(RefreshCodexAsync());
+        if (_settings.ShowCursor)
+            tasks.Add(RefreshCursorAsync());
         await Task.WhenAll(tasks);
     }
 
     private async Task RefreshClaudeAsync()
     {
-        if (_claudeBusy || _disposed) return;
+        if (_claudeBusy || _disposed)
+            return;
         _claudeBusy = true;
         try
         {
             UsageSnapshot snap = await _claude.GetUsageAsync(CancellationToken.None);
-            if (_disposed) return;
+            if (_disposed)
+                return;
             _claudeIcons.Update(snap);
             // Setting Interval restarts the countdown — exactly what we want for
             // adapting cadence (backoff on error, fast-poll right after reset).
@@ -275,22 +304,22 @@ public sealed class TrayApplicationContext : ApplicationContext
         // rolled over yet — poll faster so the new window appears promptly.
         DateTimeOffset now = DateTimeOffset.UtcNow;
         bool pastReset =
-            (snap.FiveHour?.ResetsAt is { } a && a <= now) ||
-            (snap.Weekly?.ResetsAt is { } b && b <= now);
+            (snap.FiveHour?.ResetsAt is { } a && a <= now)
+            || (snap.Weekly?.ResetsAt is { } b && b <= now);
 
-        return pastReset
-            ? (int)ClaudeFastPollAfterReset.TotalMilliseconds
-            : _claudeBaseIntervalMs;
+        return pastReset ? (int)ClaudeFastPollAfterReset.TotalMilliseconds : _claudeBaseIntervalMs;
     }
 
     private async Task RefreshCodexAsync()
     {
-        if (_codexBusy || _disposed) return;
+        if (_codexBusy || _disposed)
+            return;
         _codexBusy = true;
         try
         {
             UsageSnapshot snap = await _codex.GetUsageAsync(CancellationToken.None);
-            if (!_disposed) _codexIcons.Update(snap);
+            if (!_disposed)
+                _codexIcons.Update(snap);
         }
         finally
         {
@@ -300,12 +329,14 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private async Task RefreshCursorAsync()
     {
-        if (_cursorBusy || _disposed) return;
+        if (_cursorBusy || _disposed)
+            return;
         _cursorBusy = true;
         try
         {
             UsageSnapshot snap = await _cursor.GetUsageAsync(CancellationToken.None);
-            if (!_disposed) _cursorIcons.Update(snap);
+            if (!_disposed)
+                _cursorIcons.Update(snap);
         }
         finally
         {
@@ -313,11 +344,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private static int ClampClaudeMinutes(int minutes)
-        => Array.IndexOf(AllowedClaudeMinutes, minutes) >= 0 ? minutes : AllowedClaudeMinutes[0];
+    private static int ClampClaudeMinutes(int minutes) =>
+        Array.IndexOf(AllowedClaudeMinutes, minutes) >= 0 ? minutes : AllowedClaudeMinutes[0];
 
-    private static string FormatMinutes(int minutes)
-        => minutes < 60 ? $"{minutes} 分钟" : $"{minutes / 60} 小时";
+    private static string FormatMinutes(int minutes) =>
+        minutes < 60 ? $"{minutes} 分钟" : $"{minutes / 60} 小时";
 
     protected override void Dispose(bool disposing)
     {
@@ -353,7 +384,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         private Icon? _primaryIcon;
         private Icon? _secondaryIcon;
 
-        public ProviderIcons(string displayName, WindowSpec primary, WindowSpec secondary, ContextMenuStrip menu)
+        public ProviderIcons(
+            string displayName,
+            WindowSpec primary,
+            WindowSpec secondary,
+            ContextMenuStrip menu
+        )
         {
             _displayName = displayName;
             _primarySpec = primary;
@@ -362,12 +398,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             _secondary = MakeIcon(secondary.Bg, menu);
         }
 
-        private static NotifyIcon MakeIcon(Color bg, ContextMenuStrip menu) => new()
-        {
-            Icon = IconRenderer.Render(bg, null, isError: true),
-            Text = "加载中…",
-            ContextMenuStrip = menu,
-        };
+        private static NotifyIcon MakeIcon(Color bg, ContextMenuStrip menu) =>
+            new()
+            {
+                Icon = IconRenderer.Render(bg, null, isError: true),
+                Text = "加载中…",
+                ContextMenuStrip = menu,
+            };
 
         public void SetVisible(bool visible)
         {
@@ -382,37 +419,52 @@ public sealed class TrayApplicationContext : ApplicationContext
             ApplyTo(_secondary, ref _secondaryIcon, _secondarySpec, snap.Weekly, error, snap.Error);
         }
 
-        private void ApplyTo(NotifyIcon target, ref Icon? current, WindowSpec spec,
-            UsageMetric? metric, bool error, string? errorText)
+        private void ApplyTo(
+            NotifyIcon target,
+            ref Icon? current,
+            WindowSpec spec,
+            UsageMetric? metric,
+            bool error,
+            string? errorText
+        )
         {
-            Icon rendered = IconRenderer.Render(spec.Bg, metric?.Utilization, error || metric is null);
+            Icon rendered = IconRenderer.Render(
+                spec.Bg,
+                metric?.Utilization,
+                error || metric is null
+            );
             target.Icon = rendered;
             current?.Dispose();
             current = rendered;
 
-            target.Text = error
-                ? Truncate($"{_displayName} {spec.Label}: {errorText}")
-                : metric is null
-                    ? $"{_displayName} {spec.Label}: 无数据"
-                    : Truncate($"{_displayName} {spec.Label}: {metric.Utilization:0.#}% · 重置 {FormatReset(metric.ResetsAt, spec.LongDate)}");
+            target.Text =
+                error ? Truncate($"{_displayName} {spec.Label}: {errorText}")
+                : metric is null ? $"{_displayName} {spec.Label}: 无数据"
+                : Truncate(
+                    $"{_displayName} {spec.Label}: {metric.Utilization:0.#}% · {FormatReset(metric.ResetsAt, spec.LongDate)}"
+                );
         }
 
         private static string FormatReset(DateTimeOffset? reset, bool longDate)
         {
-            if (reset is null) return "?";
+            if (reset is null)
+                return "?";
             DateTimeOffset local = reset.Value.ToLocalTime();
             string absolute = longDate ? local.ToString("MM-dd HH:mm") : local.ToString("HH:mm");
-            return $"{absolute} (剩 {FormatRemaining(reset.Value - DateTimeOffset.Now)})";
+            return $"剩 {FormatRemaining(reset.Value - DateTimeOffset.Now)} · 重置 {absolute}";
         }
 
         private static string FormatRemaining(TimeSpan remaining)
         {
-            if (remaining <= TimeSpan.Zero) return "0m";
+            if (remaining <= TimeSpan.Zero)
+                return "0m";
             int days = remaining.Days;
             int hours = remaining.Hours;
             int minutes = remaining.Minutes;
-            if (days > 0) return $"{days}d {hours}h";
-            if (hours > 0) return $"{hours}h {minutes}m";
+            if (days > 0)
+                return $"{days}d {hours}h";
+            if (hours > 0)
+                return $"{hours}h {minutes}m";
             return $"{Math.Max(1, minutes)}m";
         }
 
