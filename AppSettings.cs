@@ -46,16 +46,26 @@ internal sealed class AppSettings
 
     public static AppSettings Load()
     {
-        try
+        if (File.Exists(SettingsPath))
         {
-            if (File.Exists(SettingsPath))
+            try
             {
                 string json = File.ReadAllText(SettingsPath);
                 return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             }
+            catch { return new AppSettings(); }
         }
-        catch { }
-        return new AppSettings();
+
+        // First launch: enable each provider only when its local credentials are present,
+        // then persist so subsequent launches use the saved choice instead of re-detecting.
+        var fresh = new AppSettings
+        {
+            ShowClaude = ClaudeUsageProvider.HasLocalCredentials(),
+            ShowCodex = CodexUsageProvider.HasLocalCredentials(),
+            ShowCursor = CursorUsageProvider.HasLocalCredentials(),
+        };
+        fresh.Save();
+        return fresh;
     }
 
     public void Save()

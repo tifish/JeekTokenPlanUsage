@@ -43,6 +43,8 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private static readonly string CredentialsPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
 
+    public static bool HasLocalCredentials() => File.Exists(CredentialsPath);
+
     private readonly HttpClient _http;
 
     private DateTimeOffset _oauthCooldownUntil = DateTimeOffset.MinValue;

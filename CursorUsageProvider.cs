@@ -24,6 +24,8 @@ public sealed class CursorUsageProvider : IUsageProvider
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Cursor", "User", "globalStorage", "state.vscdb");
 
+    public static bool HasLocalCredentials() => File.Exists(StateDbPath);
+
     private readonly HttpClient _http;
 
     public CursorUsageProvider()

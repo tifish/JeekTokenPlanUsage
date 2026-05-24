@@ -17,6 +17,8 @@ public sealed class CodexUsageProvider : IUsageProvider
     private static readonly string AuthPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "auth.json");
 
+    public static bool HasLocalCredentials() => File.Exists(AuthPath);
+
     private static readonly string CurlPath = ResolveCurl();
 
     public string Name => "Codex";
