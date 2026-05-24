@@ -39,7 +39,7 @@ public static class IconRenderer
         else
         {
             int value = (int)Math.Round(percent.Value);
-            text = value >= 100 ? "99+" : value.ToString();
+            text = value >= 100 ? "100" : value.ToString();
             textColor = value >= WarnThreshold ? WarnRed : White;
         }
 
