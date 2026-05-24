@@ -3,8 +3,12 @@ setlocal
 
 set PROJECT_NAME=JeekTokenPlanUsage
 
+if exist "bin" rd /s /q "bin"
+
 dotnet publish --configuration Release "%PROJECT_NAME%.csproj"
 if errorlevel 1 exit /b %errorlevel%
+
+if exist "bin\runtimes" rd /s /q "bin\runtimes"
 
 if exist "%PROJECT_NAME%.7z" del "%PROJECT_NAME%.7z"
 
