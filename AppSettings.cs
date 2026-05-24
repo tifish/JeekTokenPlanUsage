@@ -17,9 +17,9 @@ internal sealed class AppSettings
     public bool ShowCodex { get; set; } = true;
     public bool ShowCursor { get; set; } = true;
 
-    /// Base polling interval for Claude (minutes). Allowed: 5, 10, 30, 60.
+    /// Base polling interval for Claude (minutes). Allowed: 1, 5, 10, 30, 60.
     /// Each Claude poll may hit the messages-API fallback, which costs real
-    /// quota, so the minimum is intentionally 5 minutes (no 1-minute option).
+    /// quota — 1 minute is available but burns quota fast; default is 5.
     public int ClaudePollMinutes { get; set; } = 5;
 
     [JsonIgnore]

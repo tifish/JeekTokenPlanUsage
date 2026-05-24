@@ -12,6 +12,12 @@ namespace JeekTokenPlanUsage;
 /// minimal POST /v1/messages call and reads the anthropic-ratelimit-unified-*
 /// response headers — they carry the same usage data and are returned even on
 /// error responses.
+///
+/// On 429 from the OAuth endpoint, applies an internal cooldown to that
+/// endpoint only (ladder: 5/15/30/60 min). During cooldown the caller's poll
+/// cadence is unaffected — we just skip OAuth and go straight to the messages
+/// fallback, so we stop hammering the rate-limited endpoint without lowering
+/// data freshness for the user.
 public sealed class ClaudeUsageProvider : IUsageProvider
 {
     private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
@@ -24,10 +30,23 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         "claude-haiku-4-5-20251001",
     };
 
+    // Cooldown applied to the OAuth usage endpoint after a 429. Each consecutive
+    // 429 (after the previous cooldown elapsed) moves one step further down.
+    private static readonly TimeSpan[] OauthCooldownLadder =
+    {
+        TimeSpan.FromMinutes(5),
+        TimeSpan.FromMinutes(15),
+        TimeSpan.FromMinutes(30),
+        TimeSpan.FromHours(1),
+    };
+
     private static readonly string CredentialsPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
 
     private readonly HttpClient _http;
+
+    private DateTimeOffset _oauthCooldownUntil = DateTimeOffset.MinValue;
+    private int _oauthRateLimitStreak;
 
     public ClaudeUsageProvider()
     {
@@ -43,9 +62,29 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         if (token is null)
             return UsageSnapshot.FromError(credError ?? "无法读取 Claude 凭据");
 
-        ProviderResult primary = await TryUsageEndpointAsync(token, ct);
+        // If OAuth was recently rate-limited, skip it for this poll and go
+        // straight to the messages fallback — calling cadence is unchanged.
+        bool skipPrimary = DateTimeOffset.UtcNow < _oauthCooldownUntil;
+        ProviderResult primary = skipPrimary
+            ? ProviderResult.Skipped()
+            : await TryUsageEndpointAsync(token, ct);
+
         if (primary.AuthFailed)
             return UsageSnapshot.FromError("Token 失效 (401)，请在 Claude Code 中重新登录");
+
+        if (primary.RateLimited)
+        {
+            // Extend cooldown using the next rung of the ladder.
+            TimeSpan cd = OauthCooldownLadder[Math.Min(_oauthRateLimitStreak, OauthCooldownLadder.Length - 1)];
+            _oauthCooldownUntil = DateTimeOffset.UtcNow + cd;
+            _oauthRateLimitStreak++;
+        }
+        else if (primary.Snapshot is not null)
+        {
+            // OAuth came back fine — reset the cooldown ladder.
+            _oauthRateLimitStreak = 0;
+            _oauthCooldownUntil = DateTimeOffset.MinValue;
+        }
 
         // Primary fully succeeded (with reset times) — no need to spend a messages call.
         if (primary.Snapshot is { } ok
@@ -53,8 +92,8 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             && ok.Weekly?.ResetsAt is not null)
             return ok;
 
-        // Otherwise fall back to Messages API: as the data source if primary failed,
-        // or to fill in missing reset times if primary returned partial data.
+        // Otherwise fall back to Messages API: as the data source if primary failed
+        // or was skipped, or to fill in missing reset times if primary returned partial data.
         ProviderResult fallback = await TryMessagesFallbackAsync(token, ct);
         if (fallback.AuthFailed)
             return UsageSnapshot.FromError("Token 失效 (401)，请在 Claude Code 中重新登录");
@@ -90,6 +129,9 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         {
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 return ProviderResult.Auth();
+
+            if (resp.StatusCode == HttpStatusCode.TooManyRequests)
+                return ProviderResult.RateLimit("oauth/usage HTTP 429");
 
             if (!resp.IsSuccessStatusCode)
                 return ProviderResult.Failed($"oauth/usage HTTP {(int)resp.StatusCode}");
@@ -265,10 +307,19 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
     }
 
-    private readonly record struct ProviderResult(UsageSnapshot? Snapshot, bool AuthFailed, string? Error)
+    private readonly record struct ProviderResult(
+        UsageSnapshot? Snapshot,
+        bool AuthFailed,
+        bool RateLimited,
+        string? Error)
     {
-        public static ProviderResult Ok(UsageSnapshot snap) => new(snap, false, null);
-        public static ProviderResult Auth() => new(null, true, null);
-        public static ProviderResult Failed(string error) => new(null, false, error);
+        public static ProviderResult Ok(UsageSnapshot snap) => new(snap, false, false, null);
+        public static ProviderResult Auth() => new(null, true, false, null);
+        public static ProviderResult RateLimit(string error) => new(null, false, true, error);
+        public static ProviderResult Failed(string error) => new(null, false, false, error);
+        // Used when we deliberately did not attempt this path (e.g. OAuth in cooldown).
+        // Distinguished from Failed so the "both endpoints failed" error doesn't surface
+        // a misleading "skipped" message when the fallback is what actually failed.
+        public static ProviderResult Skipped() => new(null, false, false, null);
     }
 }

@@ -5,8 +5,9 @@ namespace JeekTokenPlanUsage;
 public sealed class TrayApplicationContext : ApplicationContext
 {
     // Allowed base intervals for Claude (minutes). Each poll may fall back to
-    // a real messages-API call that consumes quota, so the floor is 5 minutes.
-    private static readonly int[] AllowedClaudeMinutes = { 5, 10, 30, 60 };
+    // a real messages-API call that consumes quota; 1 minute is offered for
+    // users who accept that cost in exchange for fresher data.
+    private static readonly int[] AllowedClaudeMinutes = { 1, 5, 10, 30, 60 };
 
     // After a successful poll whose returned reset time is already in the past,
     // poll again at this cadence until the API rolls over to a new window.
