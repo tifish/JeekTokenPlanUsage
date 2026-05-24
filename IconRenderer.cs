@@ -6,7 +6,7 @@ namespace JeekTokenPlanUsage;
 
 /// Renders a tray icon as a colored rounded badge whose background color identifies
 /// the provider + window, with a large white percentage number. When usage is high
-/// the number turns red and a red frame is drawn as a warning.
+/// the number turns amber as a warning.
 public static class IconRenderer
 {
     private const int Size = 48;
@@ -14,8 +14,9 @@ public static class IconRenderer
 
     private const float FrameThickness = 5f;
 
+    private static readonly Color NumberBackground = Color.FromArgb(255, 0, 0, 0);
     private static readonly Color White = Color.FromArgb(255, 255, 255);
-    private static readonly Color WarnRed = Color.FromArgb(255, 69, 58);
+    private static readonly Color WarnAmber = Color.FromArgb(255, 214, 10);
     private static readonly Color ErrorFrame = Color.FromArgb(120, 120, 120);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -40,7 +41,7 @@ public static class IconRenderer
         {
             int value = (int)Math.Round(percent.Value);
             text = value >= 100 ? "100" : value.ToString();
-            textColor = value >= WarnThreshold ? WarnRed : White;
+            textColor = value >= WarnThreshold ? WarnAmber : White;
         }
 
         using var bmp = new Bitmap(Size, Size);
@@ -51,6 +52,7 @@ public static class IconRenderer
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
+            DrawNumberBackground(g);
             DrawFrame(g, frameColor);
             DrawNumber(g, text, textColor);
         }
@@ -76,6 +78,15 @@ public static class IconRenderer
         g.DrawPath(pen, path);
     }
 
+    private static void DrawNumberBackground(Graphics g)
+    {
+        float inset = FrameThickness;
+        using GraphicsPath path = RoundedRect(
+            new RectangleF(inset, inset, Size - inset * 2, Size - inset * 2), Size * 0.16f);
+        using var brush = new SolidBrush(NumberBackground);
+        g.FillPath(brush, path);
+    }
+
     private const float GlyphEm = 64f;
     private static readonly RectangleF NumberArea = new(6, 6, Size - 12, Size - 12);
 
@@ -83,7 +94,7 @@ public static class IconRenderer
     // of how many there are. Sized so a two-digit number fits the area.
     private static readonly float NumberScale = ComputeReferenceScale();
 
-    // Draws the number as a scaled glyph outline so the digits fill the icon area,
+    // Draws the number as a scaled glyph path so the digits fill the icon area,
     // rather than via DrawString (whose line-height padding leaves the glyph small).
     private static void DrawNumber(Graphics g, string text, Color color)
     {
@@ -108,9 +119,6 @@ public static class IconRenderer
         m.Translate(-b.X, -b.Y);
         path.Transform(m);
 
-        // Dark outline keeps the digits legible on lighter backgrounds.
-        using (var outline = new Pen(Color.FromArgb(150, 0, 0, 0), 2.2f) { LineJoin = LineJoin.Round })
-            g.DrawPath(outline, path);
         using var brush = new SolidBrush(color);
         g.FillPath(brush, path);
     }
