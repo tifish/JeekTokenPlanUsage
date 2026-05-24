@@ -1,0 +1,32 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+# Publish artifacts
+*.7z
+*.zip
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local settings
+*.local.json
+appsettings.Development.json
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log

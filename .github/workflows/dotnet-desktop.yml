@@ -1,0 +1,45 @@
+name: Build and Release
+
+on:
+    push:
+        branches: ["main"]
+    pull_request:
+        branches: ["main"]
+
+permissions:
+    contents: write # This grants write permissions to the contents scope
+
+env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    RELEASE_TAG: "latest_release"
+    PROJECT_NAME: "JeekTokenPlanUsage"
+
+jobs:
+    build_and_release:
+        runs-on: windows-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  submodules: true
+
+            - name: Build
+              run: dotnet publish --configuration Release ${{ env.PROJECT_NAME }}.csproj
+
+            - name: Pack files
+              run: |
+                  cd bin
+                  7z a -r ..\${{ env.PROJECT_NAME }}.7z *
+                  cd ..
+
+            - name: Delete release and tag
+              run: gh release delete ${{ env.RELEASE_TAG }} --cleanup-tag -y
+              continue-on-error: true
+
+            - name: Create a new tag and release
+              run: gh release create ${{ env.RELEASE_TAG }} --generate-notes
+
+            - name: Upload pack
+              run: gh release upload ${{ env.RELEASE_TAG }} ${{ env.PROJECT_NAME }}.7z --clobber
