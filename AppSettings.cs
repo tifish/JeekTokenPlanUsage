@@ -1,6 +1,6 @@
-using Microsoft.Win32;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Win32;
 
 namespace JeekTokenPlanUsage;
 
@@ -8,7 +8,9 @@ internal sealed class AppSettings
 {
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "JeekTokenPlanUsage", "settings.json");
+        "JeekTokenPlanUsage",
+        "settings.json"
+    );
 
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunKeyName = "JeekTokenPlanUsage";
@@ -17,10 +19,15 @@ internal sealed class AppSettings
     public bool ShowCodex { get; set; } = true;
     public bool ShowCursor { get; set; } = true;
 
-    /// Base polling interval for Claude (minutes). Allowed: 1, 5, 10, 30, 60.
-    /// Each Claude poll may hit the messages-API fallback, which costs real
-    /// quota — 1 minute is available but burns quota fast; default is 5.
-    public int ClaudePollMinutes { get; set; } = 5;
+    /// Base polling interval shared by all three providers (minutes). Allowed:
+    /// 1, 5, 10, 30, 60. Claude's poll may hit the messages-API fallback which
+    /// costs real quota — 1 minute is available but burns quota fast; default
+    /// is 5. Codex / Cursor endpoints are free, so they just inherit this.
+    public int PollMinutes { get; set; } = 5;
+
+    /// Legacy field retained only for one-shot migration from older
+    /// settings.json files. New writes leave it at 0; see Load().
+    public int ClaudePollMinutes { get; set; }
 
     [JsonIgnore]
     public bool RunAtStartup
@@ -33,7 +40,8 @@ internal sealed class AppSettings
         set
         {
             using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-            if (key is null) return;
+            if (key is null)
+                return;
             if (value)
                 key.SetValue(RunKeyName, ExePath);
             else
@@ -41,8 +49,7 @@ internal sealed class AppSettings
         }
     }
 
-    private static string ExePath =>
-        $"\"{Environment.ProcessPath ?? Application.ExecutablePath}\"";
+    private static string ExePath => $"\"{Environment.ProcessPath ?? Application.ExecutablePath}\"";
 
     public static AppSettings Load()
     {
@@ -51,9 +58,24 @@ internal sealed class AppSettings
             try
             {
                 string json = File.ReadAllText(SettingsPath);
-                return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+                AppSettings loaded =
+                    JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+
+                // Migrate legacy ClaudePollMinutes -> PollMinutes (one-shot).
+                if (loaded.PollMinutes == 0)
+                {
+                    loaded.PollMinutes =
+                        loaded.ClaudePollMinutes > 0 ? loaded.ClaudePollMinutes : 5;
+                    loaded.ClaudePollMinutes = 0;
+                    loaded.Save();
+                }
+
+                return loaded;
             }
-            catch { return new AppSettings(); }
+            catch
+            {
+                return new AppSettings();
+            }
         }
 
         // First launch: enable each provider only when its local credentials are present,
@@ -73,8 +95,10 @@ internal sealed class AppSettings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath,
-                JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(
+                SettingsPath,
+                JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })
+            );
         }
         catch { }
     }

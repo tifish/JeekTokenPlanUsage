@@ -17,7 +17,7 @@ User-Agent: codex_cli_rs/0.121.0
 ```json
 {
   "rate_limit": {
-    "primary_window":   { "used_percent": 35.2, "reset_at": 1717000000 },
+    "primary_window": { "used_percent": 35.2, "reset_at": 1717000000 },
     "secondary_window": { "used_percent": 12.7, "reset_at": 1717500000 }
   }
 }
@@ -77,19 +77,19 @@ HTTPSTATUS:200
 
 ## 错误处理
 
-| 状态 | 行为 |
-| ---- | ---- |
-| 401 | "Token 失效 (401)，请重新登录 Codex" |
-| 429 | "接口限流 (429)" |
-| 其他非 2xx | "HTTP <code>" |
-| curl 进程失败 | "curl 失败(<exit>): <stderr 前 80 字符>" |
-| JSON 缺 `rate_limit` | "响应缺少 rate_limit" |
-| 凭据缺失或损坏 | 明确错误，提示登录 Codex |
+| 状态                 | 行为                                     |
+| -------------------- | ---------------------------------------- |
+| 401                  | "Token 失效 (401)，请重新登录 Codex"     |
+| 429                  | "接口限流 (429)"                         |
+| 其他非 2xx           | "HTTP <code>"                            |
+| curl 进程失败        | "curl 失败(<exit>): <stderr 前 80 字符>" |
+| JSON 缺 `rate_limit` | "响应缺少 rate_limit"                    |
+| 凭据缺失或损坏       | 明确错误，提示登录 Codex                 |
 
 ## 轮询节奏
 
-`CodexInterval = 60 秒`，固定不变。
+基础间隔由托盘菜单"刷新间隔"统一控制，三家共用：1 / 5 / 10 / 30 / 60 分钟（默认 5）。
 
-- 端点便宜（不消耗任何配额）
+- 端点便宜（不消耗任何配额），随基础间隔走即可
 - 没有 Claude 那种 fallback 烧配额的顾虑
 - 没有阶梯退避，只有上层 `_codexBusy` 互斥防止重叠

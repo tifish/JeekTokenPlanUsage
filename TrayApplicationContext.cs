@@ -4,24 +4,19 @@ namespace JeekTokenPlanUsage;
 
 public sealed class TrayApplicationContext : ApplicationContext
 {
-    // Allowed base intervals for Claude (minutes). Each poll may fall back to
-    // a real messages-API call that consumes quota; 1 minute is offered for
-    // users who accept that cost in exchange for fresher data.
-    private static readonly int[] AllowedClaudeMinutes = { 1, 5, 10, 30, 60 };
+    // Allowed base polling intervals (minutes), shared across all three
+    // providers. Claude's fallback path may consume quota at the shorter end;
+    // 1 minute is offered for users who accept that cost in exchange for
+    // fresher data.
+    private static readonly int[] AllowedPollMinutes = { 1, 5, 10, 30, 60 };
 
-    // After a successful poll whose returned reset time is already in the past,
-    // poll again at this cadence until the API rolls over to a new window.
+    // After a successful Claude poll whose returned reset time is already in
+    // the past, poll again at this cadence until the API rolls over to a new
+    // window. Claude-only — Codex / Cursor don't need this.
     private static readonly TimeSpan ClaudeFastPollAfterReset = TimeSpan.FromSeconds(60);
 
-    // Cap on exponential backoff during sustained errors.
+    // Cap on Claude's exponential backoff during sustained errors.
     private static readonly TimeSpan ClaudeMaxBackoff = TimeSpan.FromHours(1);
-
-    // Codex is cheap (no hammer-prone endpoint), so keep a fixed interval.
-    private static readonly TimeSpan CodexInterval = TimeSpan.FromSeconds(60);
-
-    // Cursor's dashboard endpoint is similarly cheap and changes on the order of
-    // minutes, so a fixed cadence is fine.
-    private static readonly TimeSpan CursorInterval = TimeSpan.FromMinutes(2);
 
     private readonly ClaudeUsageProvider _claude = new();
     private readonly CodexUsageProvider _codex = new();
@@ -39,7 +34,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _anchor;
     private Icon? _anchorIcon;
 
-    private int _claudeBaseIntervalMs;
+    private int _baseIntervalMs;
     private int _claudeRetryCount;
 
     private bool _claudeBusy;
@@ -50,7 +45,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _settings = AppSettings.Load();
-        _claudeBaseIntervalMs = ClampClaudeMinutes(_settings.ClaudePollMinutes) * 60_000;
+        _baseIntervalMs = ClampPollMinutes(_settings.PollMinutes) * 60_000;
 
         ContextMenuStrip menu = BuildMenu(
             out ToolStripMenuItem startupItem,
@@ -98,13 +93,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         _cursorIcons.SetVisible(_settings.ShowCursor);
         UpdateAnchor();
 
-        _claudeTimer = new WinTimer { Interval = _claudeBaseIntervalMs };
+        _claudeTimer = new WinTimer { Interval = _baseIntervalMs };
         _claudeTimer.Tick += async (_, _) => await RefreshClaudeAsync();
 
-        _codexTimer = new WinTimer { Interval = (int)CodexInterval.TotalMilliseconds };
+        _codexTimer = new WinTimer { Interval = _baseIntervalMs };
         _codexTimer.Tick += async (_, _) => await RefreshCodexAsync();
 
-        _cursorTimer = new WinTimer { Interval = (int)CursorInterval.TotalMilliseconds };
+        _cursorTimer = new WinTimer { Interval = _baseIntervalMs };
         _cursorTimer.Tick += async (_, _) => await RefreshCursorAsync();
 
         WireIntervalMenu(intervalParent);
@@ -197,14 +192,16 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             if (raw is not ToolStripMenuItem item || item.Tag is not int minutes)
                 continue;
-            item.Checked = (minutes == _settings.ClaudePollMinutes);
+            item.Checked = (minutes == _settings.PollMinutes);
             item.Click += (_, _) =>
             {
-                _settings.ClaudePollMinutes = minutes;
+                _settings.PollMinutes = minutes;
                 _settings.Save();
-                _claudeBaseIntervalMs = minutes * 60_000;
+                _baseIntervalMs = minutes * 60_000;
                 _claudeRetryCount = 0;
-                _claudeTimer.Interval = _claudeBaseIntervalMs;
+                _claudeTimer.Interval = _baseIntervalMs;
+                _codexTimer.Interval = _baseIntervalMs;
+                _cursorTimer.Interval = _baseIntervalMs;
                 foreach (ToolStripItem sibling in intervalParent.DropDownItems)
                     if (sibling is ToolStripMenuItem mi)
                         mi.Checked = ReferenceEquals(mi, item);
@@ -230,8 +227,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         showCodexItem = new ToolStripMenuItem("显示 Codex 用量");
         showCursorItem = new ToolStripMenuItem("显示 Cursor 用量");
 
-        intervalParent = new ToolStripMenuItem("Claude 刷新间隔");
-        foreach (int min in AllowedClaudeMinutes)
+        intervalParent = new ToolStripMenuItem("刷新间隔");
+        foreach (int min in AllowedPollMinutes)
             intervalParent.DropDownItems.Add(
                 new ToolStripMenuItem(FormatMinutes(min)) { Tag = min }
             );
@@ -293,7 +290,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _claudeRetryCount++;
             // 2^(retry-1), capped to avoid shifting past int width.
             int shift = Math.Min(_claudeRetryCount - 1, 16);
-            long ms = (long)_claudeBaseIntervalMs * (1L << shift);
+            long ms = (long)_baseIntervalMs * (1L << shift);
             long cap = (long)ClaudeMaxBackoff.TotalMilliseconds;
             return (int)Math.Min(ms, cap);
         }
@@ -307,7 +304,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             (snap.FiveHour?.ResetsAt is { } a && a <= now)
             || (snap.Weekly?.ResetsAt is { } b && b <= now);
 
-        return pastReset ? (int)ClaudeFastPollAfterReset.TotalMilliseconds : _claudeBaseIntervalMs;
+        return pastReset ? (int)ClaudeFastPollAfterReset.TotalMilliseconds : _baseIntervalMs;
     }
 
     private async Task RefreshCodexAsync()
@@ -344,8 +341,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private static int ClampClaudeMinutes(int minutes) =>
-        Array.IndexOf(AllowedClaudeMinutes, minutes) >= 0 ? minutes : AllowedClaudeMinutes[0];
+    private static int ClampPollMinutes(int minutes) =>
+        Array.IndexOf(AllowedPollMinutes, minutes) >= 0 ? minutes : 5;
 
     private static string FormatMinutes(int minutes) =>
         minutes < 60 ? $"{minutes} 分钟" : $"{minutes / 60} 小时";

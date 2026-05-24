@@ -62,6 +62,7 @@ WorkosCursorSessionToken=<userId>%3A%3A<jwt>
 ```
 
 其中：
+
 - `%3A%3A` 是 URL 编码的 `::`
 - `<userId>` 从 JWT payload 的 `sub` 字段提取，格式 `auth0|USERID`，取 `|` 之后的部分
 - `<jwt>` 整体来自 Cursor IDE 的本地数据库
@@ -81,6 +82,7 @@ SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'
 返回的 `value` 直接是 JWT 字符串。
 
 注意几点：
+
 - 用 `SqliteOpenMode.ReadOnly` + `SqliteCacheMode.Shared` 打开，避免与正在运行的 Cursor IDE 抢锁
 - 文件不存在 → "未找到 Cursor 数据库 (请先登录 Cursor)"
 - value 为空 → 用户在 Cursor 里登录态丢了，提示重新登录
@@ -99,30 +101,30 @@ SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'
 
 [CursorUsageProvider.cs:123-143](../CursorUsageProvider.cs#L123-L143)
 
-| 程序内字段 | 来源 | 显示 |
-| --------- | ---- | ---- |
+| 程序内字段 | 来源                        | 显示                |
+| ---------- | --------------------------- | ------------------- |
 | `FiveHour` | `planUsage.autoPercentUsed` | 主图标，标签 `Auto` |
-| `Weekly`   | `planUsage.apiPercentUsed`  | 次图标，标签 `API` |
+| `Weekly`   | `planUsage.apiPercentUsed`  | 次图标，标签 `API`  |
 
 注：Cursor 的两个池都按月度计费周期重置，所以两个 `UsageMetric` 共用同一个 reset 时间。变量名 `FiveHour` / `Weekly` 是历史遗留（最初为 Claude 设计），并非真的 5 小时/周窗口。
 
 ## 错误处理
 
-| 状态 | 行为 |
-| ---- | ---- |
-| 401 / 403 | "Token 失效，请在 Cursor 中重新登录" |
-| 429 | "接口限流 (429)" |
-| 其他非 2xx | "HTTP <code>" |
-| 网络错误 | "网络错误: <msg>" |
-| 响应缺 `planUsage` | "响应缺少 planUsage" |
-| SQLite 读取失败 | "读取 Cursor 凭据失败: <msg>" |
-| JWT 格式异常 | 明确错误（缺 sub、解码失败等） |
+| 状态               | 行为                                 |
+| ------------------ | ------------------------------------ |
+| 401 / 403          | "Token 失效，请在 Cursor 中重新登录" |
+| 429                | "接口限流 (429)"                     |
+| 其他非 2xx         | "HTTP <code>"                        |
+| 网络错误           | "网络错误: <msg>"                    |
+| 响应缺 `planUsage` | "响应缺少 planUsage"                 |
+| SQLite 读取失败    | "读取 Cursor 凭据失败: <msg>"        |
+| JWT 格式异常       | 明确错误（缺 sub、解码失败等）       |
 
 ## 轮询节奏
 
-`CursorInterval = 2 分钟`，固定不变。
+基础间隔由托盘菜单"刷新间隔"统一控制，三家共用：1 / 5 / 10 / 30 / 60 分钟（默认 5）。
 
-- 两个端点都便宜，无配额消耗
+- 两个端点都便宜，无配额消耗，随基础间隔走即可
 - dashboard 端点本身就是浏览器调的，限流阈值宽
 - 没有阶梯退避，仅上层 `_cursorBusy` 互斥防止重叠
 
