@@ -25,8 +25,12 @@ internal sealed class TrayIcon : IDisposable
     private const uint NIF_MESSAGE = 0x01;
     private const uint NIF_ICON = 0x02;
     private const uint NIF_TIP = 0x04;
+    private const uint NIF_INFO = 0x10;
     private const uint NIF_GUID = 0x20;
     private const uint NIF_SHOWTIP = 0x80;
+
+    private const uint NIIF_WARNING = 0x2;
+    private const uint NIIF_RESPECT_QUIET_TIME = 0x80;
 
     private const uint NOTIFYICON_VERSION_4 = 4;
 
@@ -171,6 +175,26 @@ internal sealed class TrayIcon : IDisposable
             _added = false;
             Add();
         }
+    }
+
+    /// Shows a Windows toast/balloon via Shell_NotifyIcon NIF_INFO. Caps to the
+    /// struct's szInfoTitle (64 wchars incl. null) and szInfo (256 wchars incl.
+    /// null) limits. Re-asserts the full flag set used by Modify() so the
+    /// standard tooltip stays enabled — under NOTIFYICON_VERSION_4, NIF_SHOWTIP
+    /// is a state bit and gets dropped if any NIM_MODIFY call omits it.
+    public void ShowNotification(string title, string message)
+    {
+        if (!_added) return;
+        string t = title ?? string.Empty;
+        if (t.Length > 63) t = t[..63];
+        string m = message ?? string.Empty;
+        if (m.Length > 255) m = m[..255];
+
+        var data = BuildData(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO | NIF_GUID | NIF_SHOWTIP);
+        data.szInfoTitle = t;
+        data.szInfo = m;
+        data.dwInfoFlags = NIIF_WARNING | NIIF_RESPECT_QUIET_TIME;
+        Shell_NotifyIconW(NIM_MODIFY, ref data);
     }
 
     private void Remove()

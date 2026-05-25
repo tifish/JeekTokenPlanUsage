@@ -36,8 +36,17 @@
   <data name="Menu_LanguageAuto" xml:space="preserve">
     <value>System default</value>
   </data>
+  <data name="Menu_EnableNotifications" xml:space="preserve">
+    <value>Enable threshold notifications</value>
+  </data>
   <data name="Menu_Exit" xml:space="preserve">
     <value>Exit</value>
+  </data>
+  <data name="Notify_Title" xml:space="preserve">
+    <value>Token usage warning</value>
+  </data>
+  <data name="Notify_BodyFormat" xml:space="preserve">
+    <value>{0} {1} reached {2}%</value>
   </data>
   <data name="Tray_Loading" xml:space="preserve">
     <value>Loading…</value>

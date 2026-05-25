@@ -29,6 +29,10 @@ internal sealed class AppSettings
     /// Values match the satellite resource culture name, e.g. "en", "zh-CN".
     public string Language { get; set; } = "";
 
+    /// Show a Windows toast when a usage window first crosses 80% or 95%.
+    /// Each (window, threshold) only fires once per window cycle.
+    public bool EnableThresholdNotifications { get; set; } = true;
+
     /// Legacy field retained only for one-shot migration from older
     /// settings.json files. New writes leave it at 0; see Load().
     public int ClaudePollMinutes { get; set; }

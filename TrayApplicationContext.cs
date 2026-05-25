@@ -68,6 +68,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _intervalParent = null!;
     private ToolStripMenuItem _languageItem = null!;
     private ToolStripMenuItem _languageAutoItem = null!;
+    private ToolStripMenuItem _notifyItem = null!;
     private ToolStripMenuItem _exitItem = null!;
 
     public TrayApplicationContext()
@@ -79,13 +80,16 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         // Frame colors echo the brand icons: Claude = orange, Codex = blue, Cursor = monochrome dark;
         // the shorter window uses the brighter shade, the longer one the deeper shade.
+        Func<bool> notifyEnabled = () => _settings.EnableThresholdNotifications;
+
         _claudeIcons = new ProviderIcons(
             "Claude",
             new WindowSpec(Color.FromArgb(255, 146, 48), "5h", LongDate: false),
             new WindowSpec(Color.FromArgb(198, 93, 20), Strings.Tray_WeeklyLabel, LongDate: true),
             ClaudePrimaryGuid,
             ClaudeSecondaryGuid,
-            menu
+            menu,
+            notifyEnabled
         );
         _codexIcons = new ProviderIcons(
             "Codex",
@@ -93,7 +97,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             new WindowSpec(Color.FromArgb(30, 85, 200), Strings.Tray_WeeklyLabel, LongDate: true),
             CodexPrimaryGuid,
             CodexSecondaryGuid,
-            menu
+            menu,
+            notifyEnabled
         );
         // Cursor's brand mark is monochrome with a slight cool cast; we use a light
         // and a deep cool slate. Avoid going near pure black — it disappears on
@@ -105,7 +110,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             new WindowSpec(Color.FromArgb(85, 95, 120), "API", LongDate: true),
             CursorPrimaryGuid,
             CursorSecondaryGuid,
-            menu
+            menu,
+            notifyEnabled
         );
 
         _anchorIcon = IconRenderer.Render(Color.FromArgb(100, 100, 100), null, isError: true);
@@ -188,6 +194,15 @@ public sealed class TrayApplicationContext : ApplicationContext
             UpdateAnchor();
             if (next)
                 await RefreshCursorAsync();
+        };
+
+        _notifyItem.Checked = _settings.EnableThresholdNotifications;
+        _notifyItem.Click += (_, _) =>
+        {
+            bool next = !_notifyItem.Checked;
+            _settings.EnableThresholdNotifications = next;
+            _settings.Save();
+            _notifyItem.Checked = next;
         };
     }
 
@@ -277,6 +292,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _intervalParent.Text = Strings.Menu_RefreshInterval;
         _languageItem.Text = Strings.Menu_Language;
         _languageAutoItem.Text = Strings.Menu_LanguageAuto;
+        _notifyItem.Text = Strings.Menu_EnableNotifications;
         _exitItem.Text = Strings.Menu_Exit;
         foreach (ToolStripItem raw in _intervalParent.DropDownItems)
             if (raw is ToolStripMenuItem mi && mi.Tag is int minutes)
@@ -316,12 +332,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         _languageItem.DropDownItems.Add(new ToolStripMenuItem("简体中文") { Tag = "zh-CN" });
         _languageItem.DropDownItems.Add(new ToolStripMenuItem("English") { Tag = "en" });
 
+        _notifyItem = new ToolStripMenuItem(Strings.Menu_EnableNotifications);
+
         _exitItem = new ToolStripMenuItem(Strings.Menu_Exit);
         _exitItem.Click += (_, _) => ExitThread();
 
         menu.Items.Add(_refreshItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_startupItem);
+        menu.Items.Add(_notifyItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_showClaudeItem);
         menu.Items.Add(_showCodexItem);
@@ -456,14 +475,28 @@ public sealed class TrayApplicationContext : ApplicationContext
     /// monthly billing cycles) or can omit it (short windows like 5-hour).
     private sealed record WindowSpec(Color Bg, string Label, bool LongDate);
 
+    /// Tracks the highest threshold (in NotificationThresholds) we've already
+    /// notified for the current window cycle. Resets when the window's ResetsAt
+    /// changes — i.e., the window rolled over to a new cycle.
+    private sealed class WindowThresholdState
+    {
+        public DateTimeOffset? LastSeenReset;
+        public int LastNotifiedThreshold;
+    }
+
     /// Holds two tray icons (primary + secondary window) for one provider.
     private sealed class ProviderIcons : IDisposable
     {
+        private static readonly int[] NotificationThresholds = { 80, 95 };
+
         private readonly string _displayName;
         private readonly WindowSpec _primarySpec;
         private readonly WindowSpec _secondarySpec;
         private readonly TrayIcon _primary;
         private readonly TrayIcon _secondary;
+        private readonly Func<bool> _notifyEnabled;
+        private readonly WindowThresholdState _primaryThreshold = new();
+        private readonly WindowThresholdState _secondaryThreshold = new();
         private Icon? _primaryIcon;
         private Icon? _secondaryIcon;
 
@@ -473,12 +506,14 @@ public sealed class TrayApplicationContext : ApplicationContext
             WindowSpec secondary,
             Guid primaryGuid,
             Guid secondaryGuid,
-            ContextMenuStrip menu
+            ContextMenuStrip menu,
+            Func<bool> notifyEnabled
         )
         {
             _displayName = displayName;
             _primarySpec = primary;
             _secondarySpec = secondary;
+            _notifyEnabled = notifyEnabled;
 
             // Hold the initial placeholder icons in our own fields so the HICON
             // stays valid for as long as the shell references it.
@@ -502,8 +537,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         public void Update(UsageSnapshot snap)
         {
             bool error = snap.Error is not null;
-            ApplyTo(_primary, ref _primaryIcon, _primarySpec, snap.FiveHour, error, snap.Error);
-            ApplyTo(_secondary, ref _secondaryIcon, _secondarySpec, snap.Weekly, error, snap.Error);
+            ApplyTo(_primary, ref _primaryIcon, _primarySpec, snap.FiveHour, error, snap.Error, _primaryThreshold);
+            ApplyTo(_secondary, ref _secondaryIcon, _secondarySpec, snap.Weekly, error, snap.Error, _secondaryThreshold);
         }
 
         private void ApplyTo(
@@ -512,7 +547,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             WindowSpec spec,
             UsageMetric? metric,
             bool error,
-            string? errorText
+            string? errorText,
+            WindowThresholdState thresholdState
         )
         {
             Icon rendered = IconRenderer.Render(
@@ -532,6 +568,45 @@ public sealed class TrayApplicationContext : ApplicationContext
                 : Truncate(
                     $"{_displayName} {spec.Label}: {metric.Utilization:0.#}% · {FormatReset(metric.ResetsAt, spec.LongDate)}"
                 );
+
+            if (!error && metric is not null)
+                CheckThresholds(target, spec, metric, thresholdState);
+        }
+
+        // Each (window, threshold) fires at most once per window cycle. We treat
+        // a change in ResetsAt as a window rollover and re-arm; that way a user
+        // who hovers around 80% doesn't get spammed.
+        private void CheckThresholds(
+            TrayIcon target,
+            WindowSpec spec,
+            UsageMetric metric,
+            WindowThresholdState state)
+        {
+            if (state.LastSeenReset != metric.ResetsAt)
+            {
+                state.LastSeenReset = metric.ResetsAt;
+                state.LastNotifiedThreshold = 0;
+            }
+
+            if (!_notifyEnabled())
+                return;
+
+            int crossed = 0;
+            foreach (int t in NotificationThresholds)
+                if (metric.Utilization >= t)
+                    crossed = t;
+
+            if (crossed <= state.LastNotifiedThreshold)
+                return;
+
+            target.ShowNotification(
+                Strings.Notify_Title,
+                string.Format(
+                    Strings.Notify_BodyFormat,
+                    _displayName,
+                    spec.Label,
+                    metric.Utilization.ToString("0.#")));
+            state.LastNotifiedThreshold = crossed;
         }
 
         private static string FormatReset(DateTimeOffset? reset, bool longDate)

@@ -10,7 +10,7 @@ namespace JeekTokenPlanUsage;
 public static class IconRenderer
 {
     private const int Size = 48;
-    private const int WarnThreshold = 85;
+    private const int WarnThreshold = 80;
 
     private const float FrameThickness = 5f;
 
