@@ -34,10 +34,10 @@
     <value>Hide all</value>
   </data>
   <data name="Menu_IconDisplaySingle" xml:space="preserve">
-    <value>One per provider</value>
+    <value>One</value>
   </data>
   <data name="Menu_IconDisplayDouble" xml:space="preserve">
-    <value>Two per provider</value>
+    <value>Two</value>
   </data>
   <data name="Menu_RefreshInterval" xml:space="preserve">
     <value>Refresh interval</value>
