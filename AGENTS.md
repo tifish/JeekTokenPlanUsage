@@ -10,3 +10,4 @@
 - [Claude 用量获取](docs/claude-usage.md)
 - [Codex 用量获取](docs/codex-usage.md)
 - [Cursor 用量获取](docs/cursor-usage.md)
+- [托盘图标实现](docs/tray-icon.md)
