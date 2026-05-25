@@ -22,6 +22,18 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly CodexUsageProvider _codex = new();
     private readonly CursorUsageProvider _cursor = new();
 
+    // Stable GUIDs for every tray icon. Required so Windows 11's drag-to-reorder
+    // can tell our icons apart — without NIF_GUID the shell uses (exe path +
+    // position) as its persistence key, which is ambiguous when multiple icons
+    // come from the same process. See TrayIcon.cs for details.
+    private static readonly Guid AnchorGuid = new("3d71bbf6-953d-4a9e-adf4-4f0b3aa9913d");
+    private static readonly Guid ClaudePrimaryGuid = new("d2ced3b6-8934-4dd8-84c7-df5a2c577a7a");
+    private static readonly Guid ClaudeSecondaryGuid = new("bf0f5b5e-8163-41fa-ac2c-a7f6b6170148");
+    private static readonly Guid CodexPrimaryGuid = new("3de345d0-48fd-4539-be26-d355a6c02b21");
+    private static readonly Guid CodexSecondaryGuid = new("1d7bd7f9-da62-4c65-8127-a198d80fbe96");
+    private static readonly Guid CursorPrimaryGuid = new("34c0a3e5-d659-4612-bfb0-8c9470d65304");
+    private static readonly Guid CursorSecondaryGuid = new("39ce63d9-34ad-4ccc-85ee-4a97070cc2aa");
+
     private readonly ProviderIcons _claudeIcons;
     private readonly ProviderIcons _codexIcons;
     private readonly ProviderIcons _cursorIcons;
@@ -31,7 +43,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly WinTimer _cursorTimer;
 
     private readonly AppSettings _settings;
-    private readonly NotifyIcon _anchor;
+    private readonly TrayIcon _anchor;
     private Icon? _anchorIcon;
 
     private int _baseIntervalMs;
@@ -61,12 +73,16 @@ public sealed class TrayApplicationContext : ApplicationContext
             "Claude",
             new WindowSpec(Color.FromArgb(255, 146, 48), "5h", LongDate: false),
             new WindowSpec(Color.FromArgb(198, 93, 20), "周", LongDate: true),
+            ClaudePrimaryGuid,
+            ClaudeSecondaryGuid,
             menu
         );
         _codexIcons = new ProviderIcons(
             "Codex",
             new WindowSpec(Color.FromArgb(64, 140, 255), "5h", LongDate: false),
             new WindowSpec(Color.FromArgb(30, 85, 200), "周", LongDate: true),
+            CodexPrimaryGuid,
+            CodexSecondaryGuid,
             menu
         );
         // Cursor's brand mark is monochrome with a slight cool cast; we use a light
@@ -77,15 +93,16 @@ public sealed class TrayApplicationContext : ApplicationContext
             "Cursor",
             new WindowSpec(Color.FromArgb(170, 175, 190), "Auto", LongDate: true),
             new WindowSpec(Color.FromArgb(85, 95, 120), "API", LongDate: true),
+            CursorPrimaryGuid,
+            CursorSecondaryGuid,
             menu
         );
 
         _anchorIcon = IconRenderer.Render(Color.FromArgb(100, 100, 100), null, isError: true);
-        _anchor = new NotifyIcon
+        _anchor = new TrayIcon(AnchorGuid, menu)
         {
             Icon = _anchorIcon,
             Text = "JeekTokenPlanUsage",
-            ContextMenuStrip = menu,
         };
 
         _claudeIcons.SetVisible(_settings.ShowClaude);
@@ -376,8 +393,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         private readonly string _displayName;
         private readonly WindowSpec _primarySpec;
         private readonly WindowSpec _secondarySpec;
-        private readonly NotifyIcon _primary;
-        private readonly NotifyIcon _secondary;
+        private readonly TrayIcon _primary;
+        private readonly TrayIcon _secondary;
         private Icon? _primaryIcon;
         private Icon? _secondaryIcon;
 
@@ -385,23 +402,31 @@ public sealed class TrayApplicationContext : ApplicationContext
             string displayName,
             WindowSpec primary,
             WindowSpec secondary,
+            Guid primaryGuid,
+            Guid secondaryGuid,
             ContextMenuStrip menu
         )
         {
             _displayName = displayName;
             _primarySpec = primary;
             _secondarySpec = secondary;
-            _primary = MakeIcon(primary.Bg, menu);
-            _secondary = MakeIcon(secondary.Bg, menu);
-        }
 
-        private static NotifyIcon MakeIcon(Color bg, ContextMenuStrip menu) =>
-            new()
+            // Hold the initial placeholder icons in our own fields so the HICON
+            // stays valid for as long as the shell references it.
+            _primaryIcon = IconRenderer.Render(primary.Bg, null, isError: true);
+            _secondaryIcon = IconRenderer.Render(secondary.Bg, null, isError: true);
+
+            _primary = new TrayIcon(primaryGuid, menu)
             {
-                Icon = IconRenderer.Render(bg, null, isError: true),
+                Icon = _primaryIcon,
                 Text = "加载中…",
-                ContextMenuStrip = menu,
             };
+            _secondary = new TrayIcon(secondaryGuid, menu)
+            {
+                Icon = _secondaryIcon,
+                Text = "加载中…",
+            };
+        }
 
         public void SetVisible(bool visible)
         {
@@ -417,7 +442,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         private void ApplyTo(
-            NotifyIcon target,
+            TrayIcon target,
             ref Icon? current,
             WindowSpec spec,
             UsageMetric? metric,
@@ -430,6 +455,8 @@ public sealed class TrayApplicationContext : ApplicationContext
                 metric?.Utilization,
                 error || metric is null
             );
+            // Push the new handle to the shell first, then release the old one —
+            // otherwise the shell would briefly hold a freed HICON.
             target.Icon = rendered;
             current?.Dispose();
             current = rendered;
