@@ -15,6 +15,9 @@ internal static class Program
 
         ApplyLanguageOverride();
         ApplicationConfiguration.Initialize();
+        // Follow the OS light/dark setting. Must be called before any Form is
+        // created so SystemColors and control-internal palettes are remapped.
+        Application.SetColorMode(SystemColorMode.System);
         Application.Run(new TrayApplicationContext());
 
         GC.KeepAlive(mutex);

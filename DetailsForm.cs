@@ -23,10 +23,21 @@ internal sealed class DetailsForm : Form
     private const double WarnPercent = 80;
     private const double DangerPercent = 95;
 
-    private static readonly Color WarnOrange = Color.FromArgb(210, 130, 0);
-    private static readonly Color DangerRed = Color.FromArgb(200, 30, 30);
-    private static readonly Color MutedText = Color.FromArgb(110, 110, 110);
-    private static readonly Color BorderColor = Color.FromArgb(180, 180, 180);
+    // Accent colors stay readable on both light and dark backgrounds; the
+    // muted/border greys flip with the system theme so they keep adequate
+    // contrast against SystemColors.Window in either mode.
+    private static Color WarnOrange => Application.IsDarkModeEnabled
+        ? Color.FromArgb(240, 165, 50)
+        : Color.FromArgb(210, 130, 0);
+    private static Color DangerRed => Application.IsDarkModeEnabled
+        ? Color.FromArgb(235, 90, 90)
+        : Color.FromArgb(200, 30, 30);
+    private static Color MutedText => Application.IsDarkModeEnabled
+        ? Color.FromArgb(170, 170, 170)
+        : Color.FromArgb(110, 110, 110);
+    private static Color BorderColor => Application.IsDarkModeEnabled
+        ? Color.FromArgb(80, 80, 80)
+        : Color.FromArgb(180, 180, 180);
 
     private readonly TableLayoutPanel _table;
     private readonly List<Row> _rows = new();
