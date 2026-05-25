@@ -365,7 +365,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _settings.Save();
 
         var culture = string.IsNullOrEmpty(code)
-            ? CultureInfo.InstalledUICulture
+            ? Program.SystemUiCulture
             : CultureInfo.GetCultureInfo(code);
         CultureInfo.DefaultThreadCurrentUICulture = culture;
         Thread.CurrentThread.CurrentUICulture = culture;

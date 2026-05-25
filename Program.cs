@@ -6,6 +6,8 @@ internal static class Program
 {
     private const string MutexName = "Global\\JeekTokenPlanUsage.SingleInstance";
 
+    public static CultureInfo SystemUiCulture { get; private set; } = CultureInfo.CurrentUICulture;
+
     [STAThread]
     private static void Main()
     {
@@ -13,6 +15,7 @@ internal static class Program
         if (!createdNew)
             return;
 
+        SystemUiCulture = CultureInfo.CurrentUICulture;
         ApplyLanguageOverride();
         ApplicationConfiguration.Initialize();
         // Follow the OS light/dark setting. Must be called before any Form is
@@ -25,13 +28,15 @@ internal static class Program
 
     private static void ApplyLanguageOverride()
     {
-        string lang = AppSettings.PeekLanguage();
-        if (string.IsNullOrEmpty(lang))
-            return;
-
+        // Resolve "follow system" (empty setting) to the UI culture captured at
+        // startup. The tray menu's "System default" item uses the same SystemUiCulture,
+        // so switching back to it reproduces exactly what the app shows on launch.
         try
         {
-            var culture = CultureInfo.GetCultureInfo(lang);
+            string lang = AppSettings.PeekLanguage();
+            var culture = string.IsNullOrEmpty(lang)
+                ? SystemUiCulture
+                : CultureInfo.GetCultureInfo(lang);
             CultureInfo.DefaultThreadCurrentUICulture = culture;
             Thread.CurrentThread.CurrentUICulture = culture;
         }
