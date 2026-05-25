@@ -23,6 +23,7 @@ x86/
 *.local.json
 appsettings.Development.json
 .claude/settings.local.json
+Deploy.cmd
 
 # OS
 Thumbs.db
