@@ -42,8 +42,9 @@ internal sealed class AppSettings
     /// is 5. Codex / Cursor endpoints are free, so they just inherit this.
     public int PollMinutes { get; set; } = 5;
 
-    /// UI language override. Empty / null = follow system UI language.
-    /// Values match the satellite resource culture name, e.g. "en", "zh-CN".
+    /// UI language override. Empty / null = follow system UI language, with
+    /// English (the neutral resource) used for any culture without a satellite.
+    /// Values match a resource culture name, e.g. "en", "zh-CN".
     public string Language { get; set; } = "";
 
     /// Show a Windows toast when a usage window first crosses 80% or 95%.
