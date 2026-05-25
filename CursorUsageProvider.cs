@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using JeekTokenPlanUsage.Resources;
 using Microsoft.Data.Sqlite;
 
 namespace JeekTokenPlanUsage;
@@ -41,7 +42,7 @@ public sealed class CursorUsageProvider : IUsageProvider
     {
         (string? sessionToken, string? userId, string? credError) = BuildSessionToken();
         if (sessionToken is null || userId is null)
-            return UsageSnapshot.FromError(credError ?? "无法读取 Cursor 凭据");
+            return UsageSnapshot.FromError(credError ?? Strings.Cursor_ReadCredFailed);
 
         // Fire both calls in parallel: the dashboard endpoint for utilization,
         // the legacy endpoint just to read `startOfMonth` for reset computation.
@@ -73,15 +74,15 @@ public sealed class CursorUsageProvider : IUsageProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return (null, $"网络错误: {ex.Message}");
+            return (null, string.Format(Strings.Error_NetworkFormat, ex.Message));
         }
 
         using (resp)
         {
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                return (null, "Token 失效，请在 Cursor 中重新登录");
+                return (null, Strings.Cursor_TokenInvalid);
             if (resp.StatusCode == HttpStatusCode.TooManyRequests)
-                return (null, "接口限流 (429)");
+                return (null, Strings.Error_RateLimit429);
             if (!resp.IsSuccessStatusCode)
                 return (null, $"HTTP {(int)resp.StatusCode}");
 
@@ -128,7 +129,7 @@ public sealed class CursorUsageProvider : IUsageProvider
         {
             using var doc = JsonDocument.Parse(body);
             if (!doc.RootElement.TryGetProperty("planUsage", out JsonElement plan) || plan.ValueKind != JsonValueKind.Object)
-                return UsageSnapshot.FromError("响应缺少 planUsage");
+                return UsageSnapshot.FromError(Strings.Cursor_ResponseMissingPlan);
 
             return new UsageSnapshot
             {
@@ -140,7 +141,7 @@ public sealed class CursorUsageProvider : IUsageProvider
         }
         catch (JsonException ex)
         {
-            return UsageSnapshot.FromError($"解析失败: {ex.Message}");
+            return UsageSnapshot.FromError(string.Format(Strings.Error_ParseFormat, ex.Message));
         }
     }
 
@@ -168,7 +169,7 @@ public sealed class CursorUsageProvider : IUsageProvider
     private static (string? jwt, string? error) ReadAccessTokenJwt()
     {
         if (!File.Exists(StateDbPath))
-            return (null, "未找到 Cursor 数据库 (请先登录 Cursor)");
+            return (null, Strings.Cursor_DbNotFound);
 
         // Open read-only with shared cache so an open Cursor instance doesn't block us.
         var connStr = new SqliteConnectionStringBuilder
@@ -187,12 +188,12 @@ public sealed class CursorUsageProvider : IUsageProvider
             object? raw = cmd.ExecuteScalar();
             string? token = raw as string;
             return string.IsNullOrEmpty(token)
-                ? (null, "Cursor 凭据为空 (请在 Cursor 中登录)")
+                ? (null, Strings.Cursor_CredEmpty)
                 : (token, null);
         }
         catch (Exception ex)
         {
-            return (null, $"读取 Cursor 凭据失败: {ex.Message}");
+            return (null, string.Format(Strings.Cursor_ReadCredFailedFormat, ex.Message));
         }
     }
 
@@ -203,7 +204,7 @@ public sealed class CursorUsageProvider : IUsageProvider
         string[] parts = jwt.Split('.');
         if (parts.Length < 2)
         {
-            error = "JWT 格式无效";
+            error = Strings.Jwt_Invalid;
             return false;
         }
 
@@ -213,13 +214,13 @@ public sealed class CursorUsageProvider : IUsageProvider
             using var doc = JsonDocument.Parse(payloadBytes);
             if (!doc.RootElement.TryGetProperty("sub", out JsonElement sub) || sub.ValueKind != JsonValueKind.String)
             {
-                error = "JWT 缺少 sub 字段";
+                error = Strings.Jwt_MissingSub;
                 return false;
             }
             string? subValue = sub.GetString();
             if (string.IsNullOrEmpty(subValue))
             {
-                error = "JWT sub 为空";
+                error = Strings.Jwt_EmptySub;
                 return false;
             }
             // sub format is e.g. "auth0|USERID" — take the segment after the bar.
@@ -229,7 +230,7 @@ public sealed class CursorUsageProvider : IUsageProvider
         }
         catch (Exception ex)
         {
-            error = $"解析 JWT 失败: {ex.Message}";
+            error = string.Format(Strings.Jwt_ParseFailedFormat, ex.Message);
             return false;
         }
     }

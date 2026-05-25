@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace JeekTokenPlanUsage;
 
 internal static class Program
@@ -11,9 +13,25 @@ internal static class Program
         if (!createdNew)
             return;
 
+        ApplyLanguageOverride();
         ApplicationConfiguration.Initialize();
         Application.Run(new TrayApplicationContext());
 
         GC.KeepAlive(mutex);
+    }
+
+    private static void ApplyLanguageOverride()
+    {
+        string lang = AppSettings.PeekLanguage();
+        if (string.IsNullOrEmpty(lang))
+            return;
+
+        try
+        {
+            var culture = CultureInfo.GetCultureInfo(lang);
+            CultureInfo.DefaultThreadCurrentUICulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+        }
+        catch (CultureNotFoundException) { }
     }
 }

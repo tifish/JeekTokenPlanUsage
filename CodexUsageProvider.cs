@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using JeekTokenPlanUsage.Resources;
 
 namespace JeekTokenPlanUsage;
 
@@ -26,23 +27,23 @@ public sealed class CodexUsageProvider : IUsageProvider
     public async Task<UsageSnapshot> GetUsageAsync(CancellationToken ct)
     {
         if (CurlPath is "")
-            return UsageSnapshot.FromError("未找到 curl.exe");
+            return UsageSnapshot.FromError(Strings.Codex_CurlNotFound);
 
         (string? token, string? account, string? credError) = ReadAuth();
         if (token is null)
-            return UsageSnapshot.FromError(credError ?? "无法读取 Codex 凭据");
+            return UsageSnapshot.FromError(credError ?? Strings.Codex_ReadCredFailed);
 
         string config = BuildCurlConfig(token, account);
 
         (string stdout, string stderr, int exitCode) = await RunCurlAsync(config, ct);
         if (exitCode != 0)
-            return UsageSnapshot.FromError($"curl 失败({exitCode}): {Trim(stderr)}");
+            return UsageSnapshot.FromError(string.Format(Strings.Codex_CurlFailedFormat, exitCode, Trim(stderr)));
 
         (string body, int status) = SplitStatus(stdout);
         if (status == 401)
-            return UsageSnapshot.FromError("Token 失效 (401)，请重新登录 Codex");
+            return UsageSnapshot.FromError(Strings.Codex_TokenInvalid);
         if (status == 429)
-            return UsageSnapshot.FromError("接口限流 (429)");
+            return UsageSnapshot.FromError(Strings.Error_RateLimit429);
         if (status is < 200 or >= 300)
             return UsageSnapshot.FromError($"HTTP {status}");
 
@@ -123,7 +124,7 @@ public sealed class CodexUsageProvider : IUsageProvider
         {
             using var doc = JsonDocument.Parse(body);
             if (!doc.RootElement.TryGetProperty("rate_limit", out JsonElement rl) || rl.ValueKind != JsonValueKind.Object)
-                return UsageSnapshot.FromError("响应缺少 rate_limit");
+                return UsageSnapshot.FromError(Strings.Codex_ResponseMissingRateLimit);
 
             return new UsageSnapshot
             {
@@ -133,7 +134,7 @@ public sealed class CodexUsageProvider : IUsageProvider
         }
         catch (JsonException ex)
         {
-            return UsageSnapshot.FromError($"解析失败: {ex.Message}");
+            return UsageSnapshot.FromError(string.Format(Strings.Error_ParseFormat, ex.Message));
         }
     }
 
@@ -156,7 +157,7 @@ public sealed class CodexUsageProvider : IUsageProvider
     private static (string? token, string? account, string? error) ReadAuth()
     {
         if (!File.Exists(AuthPath))
-            return (null, null, "未找到 ~/.codex/auth.json");
+            return (null, null, Strings.Codex_AuthNotFound);
 
         try
         {
@@ -165,7 +166,7 @@ public sealed class CodexUsageProvider : IUsageProvider
                 !tokens.TryGetProperty("access_token", out JsonElement at) ||
                 at.ValueKind != JsonValueKind.String)
             {
-                return (null, null, "凭据缺少 access_token (请登录 Codex)");
+                return (null, null, Strings.Codex_AuthMissingToken);
             }
 
             string? account = tokens.TryGetProperty("account_id", out JsonElement acc) && acc.ValueKind == JsonValueKind.String
@@ -176,7 +177,7 @@ public sealed class CodexUsageProvider : IUsageProvider
         }
         catch (Exception ex)
         {
-            return (null, null, $"读取凭据失败: {ex.Message}");
+            return (null, null, string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message));
         }
     }
 

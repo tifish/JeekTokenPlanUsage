@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using JeekTokenPlanUsage.Resources;
 
 namespace JeekTokenPlanUsage;
 
@@ -62,7 +63,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     {
         string? token = ReadAccessToken(out string? credError);
         if (token is null)
-            return UsageSnapshot.FromError(credError ?? "无法读取 Claude 凭据");
+            return UsageSnapshot.FromError(credError ?? Strings.Claude_ReadCredFailed);
 
         // If OAuth was recently rate-limited, skip it for this poll and go
         // straight to the messages fallback — calling cadence is unchanged.
@@ -72,7 +73,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             : await TryUsageEndpointAsync(token, ct);
 
         if (primary.AuthFailed)
-            return UsageSnapshot.FromError("Token 失效 (401)，请在 Claude Code 中重新登录");
+            return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
 
         if (primary.RateLimited)
         {
@@ -98,7 +99,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         // or was skipped, or to fill in missing reset times if primary returned partial data.
         ProviderResult fallback = await TryMessagesFallbackAsync(token, ct);
         if (fallback.AuthFailed)
-            return UsageSnapshot.FromError("Token 失效 (401)，请在 Claude Code 中重新登录");
+            return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
 
         if (primary.Snapshot is not null && fallback.Snapshot is not null)
             return Merge(primary.Snapshot, fallback.Snapshot);
@@ -108,7 +109,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         if (fallback.Snapshot is not null)
             return fallback.Snapshot;
 
-        return UsageSnapshot.FromError(primary.Error ?? fallback.Error ?? "获取用量失败");
+        return UsageSnapshot.FromError(primary.Error ?? fallback.Error ?? Strings.Error_FetchUsage);
     }
 
     private async Task<ProviderResult> TryUsageEndpointAsync(string token, CancellationToken ct)
@@ -124,7 +125,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return ProviderResult.Failed($"网络错误: {ex.Message}");
+            return ProviderResult.Failed(string.Format(Strings.Error_NetworkFormat, ex.Message));
         }
 
         using (resp)
@@ -152,7 +153,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             }
             catch (JsonException ex)
             {
-                return ProviderResult.Failed($"解析失败: {ex.Message}");
+                return ProviderResult.Failed(string.Format(Strings.Error_ParseFormat, ex.Message));
             }
         }
     }
@@ -185,7 +186,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                lastError = $"网络错误: {ex.Message}";
+                lastError = string.Format(Strings.Error_NetworkFormat, ex.Message);
                 continue;
             }
 
@@ -200,11 +201,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 if (fromHeaders is not null)
                     return ProviderResult.Ok(fromHeaders);
 
-                lastError = $"messages[{model}] HTTP {(int)resp.StatusCode} 且无 rate-limit 头";
+                lastError = string.Format(Strings.Claude_MessagesNoHeaderFormat, model, (int)resp.StatusCode);
             }
         }
 
-        return ProviderResult.Failed(lastError ?? "messages fallback 失败");
+        return ProviderResult.Failed(lastError ?? Strings.Claude_MessagesFallbackFailed);
     }
 
     private static UsageSnapshot? ReadRateLimitHeaders(HttpResponseMessage resp)
@@ -285,7 +286,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         error = null;
         if (!File.Exists(CredentialsPath))
         {
-            error = "未找到 ~/.claude/.credentials.json";
+            error = Strings.Claude_CredNotFound;
             return null;
         }
 
@@ -299,12 +300,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             {
                 return tok.GetString();
             }
-            error = "凭据文件缺少 accessToken";
+            error = Strings.Claude_CredMissingToken;
             return null;
         }
         catch (Exception ex)
         {
-            error = $"读取凭据失败: {ex.Message}";
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
             return null;
         }
     }

@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Menu_RefreshNow" xml:space="preserve">
+    <value>立即刷新</value>
+  </data>
+  <data name="Menu_RunAtStartup" xml:space="preserve">
+    <value>开机启动</value>
+  </data>
+  <data name="Menu_ShowClaude" xml:space="preserve">
+    <value>显示 Claude 用量</value>
+  </data>
+  <data name="Menu_ShowCodex" xml:space="preserve">
+    <value>显示 Codex 用量</value>
+  </data>
+  <data name="Menu_ShowCursor" xml:space="preserve">
+    <value>显示 Cursor 用量</value>
+  </data>
+  <data name="Menu_RefreshInterval" xml:space="preserve">
+    <value>刷新间隔</value>
+  </data>
+  <data name="Menu_Language" xml:space="preserve">
+    <value>语言</value>
+  </data>
+  <data name="Menu_LanguageAuto" xml:space="preserve">
+    <value>跟随系统</value>
+  </data>
+  <data name="Menu_Exit" xml:space="preserve">
+    <value>退出</value>
+  </data>
+  <data name="Tray_Loading" xml:space="preserve">
+    <value>加载中…</value>
+  </data>
+  <data name="Tray_NoData" xml:space="preserve">
+    <value>无数据</value>
+  </data>
+  <data name="Tray_ResetFormat" xml:space="preserve">
+    <value>剩 {0} · 重置 {1}</value>
+  </data>
+  <data name="Tray_WeeklyLabel" xml:space="preserve">
+    <value>周</value>
+  </data>
+  <data name="Interval_MinutesFormat" xml:space="preserve">
+    <value>{0} 分钟</value>
+  </data>
+  <data name="Interval_HoursFormat" xml:space="preserve">
+    <value>{0} 小时</value>
+  </data>
+  <data name="Error_FetchUsage" xml:space="preserve">
+    <value>获取用量失败</value>
+  </data>
+  <data name="Error_NetworkFormat" xml:space="preserve">
+    <value>网络错误: {0}</value>
+  </data>
+  <data name="Error_ParseFormat" xml:space="preserve">
+    <value>解析失败: {0}</value>
+  </data>
+  <data name="Error_RateLimit429" xml:space="preserve">
+    <value>接口限流 (429)</value>
+  </data>
+  <data name="Claude_ReadCredFailed" xml:space="preserve">
+    <value>无法读取 Claude 凭据</value>
+  </data>
+  <data name="Claude_TokenInvalid" xml:space="preserve">
+    <value>Token 失效 (401)，请在 Claude Code 中重新登录</value>
+  </data>
+  <data name="Claude_CredNotFound" xml:space="preserve">
+    <value>未找到 ~/.claude/.credentials.json</value>
+  </data>
+  <data name="Claude_CredMissingToken" xml:space="preserve">
+    <value>凭据文件缺少 accessToken</value>
+  </data>
+  <data name="Claude_ReadCredFailedFormat" xml:space="preserve">
+    <value>读取凭据失败: {0}</value>
+  </data>
+  <data name="Claude_MessagesNoHeaderFormat" xml:space="preserve">
+    <value>messages[{0}] HTTP {1} 且无 rate-limit 头</value>
+  </data>
+  <data name="Claude_MessagesFallbackFailed" xml:space="preserve">
+    <value>messages fallback 失败</value>
+  </data>
+  <data name="Codex_CurlNotFound" xml:space="preserve">
+    <value>未找到 curl.exe</value>
+  </data>
+  <data name="Codex_ReadCredFailed" xml:space="preserve">
+    <value>无法读取 Codex 凭据</value>
+  </data>
+  <data name="Codex_CurlFailedFormat" xml:space="preserve">
+    <value>curl 失败({0}): {1}</value>
+  </data>
+  <data name="Codex_TokenInvalid" xml:space="preserve">
+    <value>Token 失效 (401)，请重新登录 Codex</value>
+  </data>
+  <data name="Codex_ResponseMissingRateLimit" xml:space="preserve">
+    <value>响应缺少 rate_limit</value>
+  </data>
+  <data name="Codex_AuthNotFound" xml:space="preserve">
+    <value>未找到 ~/.codex/auth.json</value>
+  </data>
+  <data name="Codex_AuthMissingToken" xml:space="preserve">
+    <value>凭据缺少 access_token (请登录 Codex)</value>
+  </data>
+  <data name="Cursor_ReadCredFailed" xml:space="preserve">
+    <value>无法读取 Cursor 凭据</value>
+  </data>
+  <data name="Cursor_TokenInvalid" xml:space="preserve">
+    <value>Token 失效，请在 Cursor 中重新登录</value>
+  </data>
+  <data name="Cursor_ResponseMissingPlan" xml:space="preserve">
+    <value>响应缺少 planUsage</value>
+  </data>
+  <data name="Cursor_DbNotFound" xml:space="preserve">
+    <value>未找到 Cursor 数据库 (请先登录 Cursor)</value>
+  </data>
+  <data name="Cursor_CredEmpty" xml:space="preserve">
+    <value>Cursor 凭据为空 (请在 Cursor 中登录)</value>
+  </data>
+  <data name="Cursor_ReadCredFailedFormat" xml:space="preserve">
+    <value>读取 Cursor 凭据失败: {0}</value>
+  </data>
+  <data name="Jwt_Invalid" xml:space="preserve">
+    <value>JWT 格式无效</value>
+  </data>
+  <data name="Jwt_MissingSub" xml:space="preserve">
+    <value>JWT 缺少 sub 字段</value>
+  </data>
+  <data name="Jwt_EmptySub" xml:space="preserve">
+    <value>JWT sub 为空</value>
+  </data>
+  <data name="Jwt_ParseFailedFormat" xml:space="preserve">
+    <value>解析 JWT 失败: {0}</value>
+  </data>
+</root>

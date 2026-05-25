@@ -25,6 +25,10 @@ internal sealed class AppSettings
     /// is 5. Codex / Cursor endpoints are free, so they just inherit this.
     public int PollMinutes { get; set; } = 5;
 
+    /// UI language override. Empty / null = follow system UI language.
+    /// Values match the satellite resource culture name, e.g. "en", "zh-CN".
+    public string Language { get; set; } = "";
+
     /// Legacy field retained only for one-shot migration from older
     /// settings.json files. New writes leave it at 0; see Load().
     public int ClaudePollMinutes { get; set; }
@@ -50,6 +54,28 @@ internal sealed class AppSettings
     }
 
     private static string ExePath => $"\"{Environment.ProcessPath ?? Application.ExecutablePath}\"";
+
+    /// Side-effect-free read of just the Language field, used at startup before
+    /// any WinForms code (and before any provider credential probing in Load).
+    /// Returns "" when the file is missing or unreadable — caller treats empty
+    /// as "follow system UI culture".
+    public static string PeekLanguage()
+    {
+        if (!File.Exists(SettingsPath))
+            return "";
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(SettingsPath));
+            return doc.RootElement.TryGetProperty("Language", out var el)
+                && el.ValueKind == JsonValueKind.String
+                ? el.GetString() ?? ""
+                : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
 
     public static AppSettings Load()
     {

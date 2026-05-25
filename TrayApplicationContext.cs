@@ -1,3 +1,5 @@
+using System.Globalization;
+using JeekTokenPlanUsage.Resources;
 using WinTimer = System.Windows.Forms.Timer;
 
 namespace JeekTokenPlanUsage;
@@ -54,25 +56,33 @@ public sealed class TrayApplicationContext : ApplicationContext
     private bool _cursorBusy;
     private bool _disposed;
 
+    // Menu items kept as fields so they can be re-localized in place when the
+    // user switches language without rebuilding (and re-wiring) the menu.
+    // Not readonly: BuildMenu assigns them, which the compiler can't see as
+    // a constructor-only init even though it's only called from the ctor.
+    private ToolStripMenuItem _refreshItem = null!;
+    private ToolStripMenuItem _startupItem = null!;
+    private ToolStripMenuItem _showClaudeItem = null!;
+    private ToolStripMenuItem _showCodexItem = null!;
+    private ToolStripMenuItem _showCursorItem = null!;
+    private ToolStripMenuItem _intervalParent = null!;
+    private ToolStripMenuItem _languageItem = null!;
+    private ToolStripMenuItem _languageAutoItem = null!;
+    private ToolStripMenuItem _exitItem = null!;
+
     public TrayApplicationContext()
     {
         _settings = AppSettings.Load();
         _baseIntervalMs = ClampPollMinutes(_settings.PollMinutes) * 60_000;
 
-        ContextMenuStrip menu = BuildMenu(
-            out ToolStripMenuItem startupItem,
-            out ToolStripMenuItem showClaudeItem,
-            out ToolStripMenuItem showCodexItem,
-            out ToolStripMenuItem showCursorItem,
-            out ToolStripMenuItem intervalParent
-        );
+        ContextMenuStrip menu = BuildMenu();
 
         // Frame colors echo the brand icons: Claude = orange, Codex = blue, Cursor = monochrome dark;
         // the shorter window uses the brighter shade, the longer one the deeper shade.
         _claudeIcons = new ProviderIcons(
             "Claude",
             new WindowSpec(Color.FromArgb(255, 146, 48), "5h", LongDate: false),
-            new WindowSpec(Color.FromArgb(198, 93, 20), "周", LongDate: true),
+            new WindowSpec(Color.FromArgb(198, 93, 20), Strings.Tray_WeeklyLabel, LongDate: true),
             ClaudePrimaryGuid,
             ClaudeSecondaryGuid,
             menu
@@ -80,7 +90,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _codexIcons = new ProviderIcons(
             "Codex",
             new WindowSpec(Color.FromArgb(64, 140, 255), "5h", LongDate: false),
-            new WindowSpec(Color.FromArgb(30, 85, 200), "周", LongDate: true),
+            new WindowSpec(Color.FromArgb(30, 85, 200), Strings.Tray_WeeklyLabel, LongDate: true),
             CodexPrimaryGuid,
             CodexSecondaryGuid,
             menu
@@ -119,7 +129,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         _cursorTimer = new WinTimer { Interval = _baseIntervalMs };
         _cursorTimer.Tick += async (_, _) => await RefreshCursorAsync();
 
-        WireIntervalMenu(intervalParent);
+        WireIntervalMenu();
+        WireLanguageMenu();
         ApplyTimers();
 
         if (_settings.ShowClaude)
@@ -129,21 +140,21 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_settings.ShowCursor)
             _ = RefreshCursorAsync();
 
-        startupItem.Checked = _settings.RunAtStartup;
-        startupItem.Click += (_, _) =>
+        _startupItem.Checked = _settings.RunAtStartup;
+        _startupItem.Click += (_, _) =>
         {
-            bool next = !startupItem.Checked;
+            bool next = !_startupItem.Checked;
             _settings.RunAtStartup = next;
-            startupItem.Checked = next;
+            _startupItem.Checked = next;
         };
 
-        showClaudeItem.Checked = _settings.ShowClaude;
-        showClaudeItem.Click += async (_, _) =>
+        _showClaudeItem.Checked = _settings.ShowClaude;
+        _showClaudeItem.Click += async (_, _) =>
         {
-            bool next = !showClaudeItem.Checked;
+            bool next = !_showClaudeItem.Checked;
             _settings.ShowClaude = next;
             _settings.Save();
-            showClaudeItem.Checked = next;
+            _showClaudeItem.Checked = next;
             _claudeIcons.SetVisible(next);
             ApplyTimers();
             UpdateAnchor();
@@ -151,13 +162,13 @@ public sealed class TrayApplicationContext : ApplicationContext
                 await RefreshClaudeAsync();
         };
 
-        showCodexItem.Checked = _settings.ShowCodex;
-        showCodexItem.Click += async (_, _) =>
+        _showCodexItem.Checked = _settings.ShowCodex;
+        _showCodexItem.Click += async (_, _) =>
         {
-            bool next = !showCodexItem.Checked;
+            bool next = !_showCodexItem.Checked;
             _settings.ShowCodex = next;
             _settings.Save();
-            showCodexItem.Checked = next;
+            _showCodexItem.Checked = next;
             _codexIcons.SetVisible(next);
             ApplyTimers();
             UpdateAnchor();
@@ -165,13 +176,13 @@ public sealed class TrayApplicationContext : ApplicationContext
                 await RefreshCodexAsync();
         };
 
-        showCursorItem.Checked = _settings.ShowCursor;
-        showCursorItem.Click += async (_, _) =>
+        _showCursorItem.Checked = _settings.ShowCursor;
+        _showCursorItem.Click += async (_, _) =>
         {
-            bool next = !showCursorItem.Checked;
+            bool next = !_showCursorItem.Checked;
             _settings.ShowCursor = next;
             _settings.Save();
-            showCursorItem.Checked = next;
+            _showCursorItem.Checked = next;
             _cursorIcons.SetVisible(next);
             ApplyTimers();
             UpdateAnchor();
@@ -203,9 +214,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             _cursorTimer.Stop();
     }
 
-    private void WireIntervalMenu(ToolStripMenuItem intervalParent)
+    private void WireIntervalMenu()
     {
-        foreach (ToolStripItem raw in intervalParent.DropDownItems)
+        foreach (ToolStripItem raw in _intervalParent.DropDownItems)
         {
             if (raw is not ToolStripMenuItem item || item.Tag is not int minutes)
                 continue;
@@ -219,50 +230,106 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _claudeTimer.Interval = _baseIntervalMs;
                 _codexTimer.Interval = _baseIntervalMs;
                 _cursorTimer.Interval = _baseIntervalMs;
-                foreach (ToolStripItem sibling in intervalParent.DropDownItems)
+                foreach (ToolStripItem sibling in _intervalParent.DropDownItems)
                     if (sibling is ToolStripMenuItem mi)
                         mi.Checked = ReferenceEquals(mi, item);
             };
         }
     }
 
-    private ContextMenuStrip BuildMenu(
-        out ToolStripMenuItem startupItem,
-        out ToolStripMenuItem showClaudeItem,
-        out ToolStripMenuItem showCodexItem,
-        out ToolStripMenuItem showCursorItem,
-        out ToolStripMenuItem intervalParent
-    )
+    private void WireLanguageMenu()
+    {
+        foreach (ToolStripItem raw in _languageItem.DropDownItems)
+        {
+            if (raw is not ToolStripMenuItem item || item.Tag is not string code)
+                continue;
+            item.Checked = (code == _settings.Language);
+            item.Click += (_, _) => SetLanguage(code);
+        }
+    }
+
+    private void SetLanguage(string code)
+    {
+        if (code == _settings.Language)
+            return;
+        _settings.Language = code;
+        _settings.Save();
+
+        var culture = string.IsNullOrEmpty(code)
+            ? CultureInfo.InstalledUICulture
+            : CultureInfo.GetCultureInfo(code);
+        CultureInfo.DefaultThreadCurrentUICulture = culture;
+        Thread.CurrentThread.CurrentUICulture = culture;
+
+        RelocalizeMenu();
+        // Tray tooltip text is rebuilt from Strings.* on next refresh tick;
+        // trigger one now so the change is immediately visible.
+        _ = RefreshAllAsync();
+    }
+
+    private void RelocalizeMenu()
+    {
+        _refreshItem.Text = Strings.Menu_RefreshNow;
+        _startupItem.Text = Strings.Menu_RunAtStartup;
+        _showClaudeItem.Text = Strings.Menu_ShowClaude;
+        _showCodexItem.Text = Strings.Menu_ShowCodex;
+        _showCursorItem.Text = Strings.Menu_ShowCursor;
+        _intervalParent.Text = Strings.Menu_RefreshInterval;
+        _languageItem.Text = Strings.Menu_Language;
+        _languageAutoItem.Text = Strings.Menu_LanguageAuto;
+        _exitItem.Text = Strings.Menu_Exit;
+        foreach (ToolStripItem raw in _intervalParent.DropDownItems)
+            if (raw is ToolStripMenuItem mi && mi.Tag is int minutes)
+                mi.Text = FormatMinutes(minutes);
+
+        // Language radio state may have changed; update the checkmarks.
+        foreach (ToolStripItem raw in _languageItem.DropDownItems)
+            if (raw is ToolStripMenuItem mi && mi.Tag is string code)
+                mi.Checked = (code == _settings.Language);
+    }
+
+    private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
 
-        var refreshItem = new ToolStripMenuItem("立即刷新");
-        refreshItem.Click += async (_, _) => await RefreshAllAsync();
+        _refreshItem = new ToolStripMenuItem(Strings.Menu_RefreshNow);
+        _refreshItem.Click += async (_, _) => await RefreshAllAsync();
 
-        startupItem = new ToolStripMenuItem("开机启动");
-        showClaudeItem = new ToolStripMenuItem("显示 Claude 用量");
-        showCodexItem = new ToolStripMenuItem("显示 Codex 用量");
-        showCursorItem = new ToolStripMenuItem("显示 Cursor 用量");
+        _startupItem = new ToolStripMenuItem(Strings.Menu_RunAtStartup);
+        _showClaudeItem = new ToolStripMenuItem(Strings.Menu_ShowClaude);
+        _showCodexItem = new ToolStripMenuItem(Strings.Menu_ShowCodex);
+        _showCursorItem = new ToolStripMenuItem(Strings.Menu_ShowCursor);
 
-        intervalParent = new ToolStripMenuItem("刷新间隔");
+        _intervalParent = new ToolStripMenuItem(Strings.Menu_RefreshInterval);
         foreach (int min in AllowedPollMinutes)
-            intervalParent.DropDownItems.Add(
+            _intervalParent.DropDownItems.Add(
                 new ToolStripMenuItem(FormatMinutes(min)) { Tag = min }
             );
 
-        var exitItem = new ToolStripMenuItem("退出");
-        exitItem.Click += (_, _) => ExitThread();
+        // Language names stay in their native script regardless of the current
+        // UI culture — that's the standard convention so users can find their
+        // language even when the app is in a script they can't read. The
+        // "follow system" item is the only one that gets localized.
+        _languageItem = new ToolStripMenuItem(Strings.Menu_Language);
+        _languageAutoItem = new ToolStripMenuItem(Strings.Menu_LanguageAuto) { Tag = "" };
+        _languageItem.DropDownItems.Add(_languageAutoItem);
+        _languageItem.DropDownItems.Add(new ToolStripMenuItem("简体中文") { Tag = "zh-CN" });
+        _languageItem.DropDownItems.Add(new ToolStripMenuItem("English") { Tag = "en" });
 
-        menu.Items.Add(refreshItem);
+        _exitItem = new ToolStripMenuItem(Strings.Menu_Exit);
+        _exitItem.Click += (_, _) => ExitThread();
+
+        menu.Items.Add(_refreshItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(startupItem);
+        menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(showClaudeItem);
-        menu.Items.Add(showCodexItem);
-        menu.Items.Add(showCursorItem);
-        menu.Items.Add(intervalParent);
+        menu.Items.Add(_showClaudeItem);
+        menu.Items.Add(_showCodexItem);
+        menu.Items.Add(_showCursorItem);
+        menu.Items.Add(_intervalParent);
+        menu.Items.Add(_languageItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(exitItem);
+        menu.Items.Add(_exitItem);
 
         return menu;
     }
@@ -362,7 +429,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         Array.IndexOf(AllowedPollMinutes, minutes) >= 0 ? minutes : 5;
 
     private static string FormatMinutes(int minutes) =>
-        minutes < 60 ? $"{minutes} 分钟" : $"{minutes / 60} 小时";
+        minutes < 60
+            ? string.Format(Strings.Interval_MinutesFormat, minutes)
+            : string.Format(Strings.Interval_HoursFormat, minutes / 60);
 
     protected override void Dispose(bool disposing)
     {
@@ -416,15 +485,11 @@ public sealed class TrayApplicationContext : ApplicationContext
             _primaryIcon = IconRenderer.Render(primary.Bg, null, isError: true);
             _secondaryIcon = IconRenderer.Render(secondary.Bg, null, isError: true);
 
-            _primary = new TrayIcon(primaryGuid, menu)
-            {
-                Icon = _primaryIcon,
-                Text = "加载中…",
-            };
+            _primary = new TrayIcon(primaryGuid, menu) { Icon = _primaryIcon, Text = Strings.Tray_Loading };
             _secondary = new TrayIcon(secondaryGuid, menu)
             {
                 Icon = _secondaryIcon,
-                Text = "加载中…",
+                Text = Strings.Tray_Loading,
             };
         }
 
@@ -463,7 +528,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
             target.Text =
                 error ? Truncate($"{_displayName} {spec.Label}: {errorText}")
-                : metric is null ? $"{_displayName} {spec.Label}: 无数据"
+                : metric is null ? $"{_displayName} {spec.Label}: {Strings.Tray_NoData}"
                 : Truncate(
                     $"{_displayName} {spec.Label}: {metric.Utilization:0.#}% · {FormatReset(metric.ResetsAt, spec.LongDate)}"
                 );
@@ -475,7 +540,11 @@ public sealed class TrayApplicationContext : ApplicationContext
                 return "?";
             DateTimeOffset local = reset.Value.ToLocalTime();
             string absolute = longDate ? local.ToString("MM-dd HH:mm") : local.ToString("HH:mm");
-            return $"剩 {FormatRemaining(reset.Value - DateTimeOffset.Now)} · 重置 {absolute}";
+            return string.Format(
+                Strings.Tray_ResetFormat,
+                FormatRemaining(reset.Value - DateTimeOffset.Now),
+                absolute
+            );
         }
 
         private static string FormatRemaining(TimeSpan remaining)
