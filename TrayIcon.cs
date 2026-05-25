@@ -205,6 +205,8 @@ internal sealed class TrayIcon : IDisposable
         _added = false;
     }
 
+    public Action? LeftClick { get; set; }
+
     private void OnTrayMessage(IntPtr lParam)
     {
         // Version-4 callback packs the notification message in lParam LOWORD.
@@ -214,6 +216,14 @@ internal sealed class TrayIcon : IDisposable
             case WM_RBUTTONUP:
             case WM_CONTEXTMENU:
                 ShowMenu();
+                break;
+            case NIN_SELECT:
+                // Under NOTIFYICON_VERSION_4, NIN_SELECT covers both mouse and
+                // keyboard activation; the raw WM_LBUTTONUP also fires for the
+                // same click and would cause a double-toggle if we listened to
+                // both. Same goes for NIN_KEYSELECT, which is paired with
+                // NIN_SELECT on keyboard activation.
+                LeftClick?.Invoke();
                 break;
         }
     }

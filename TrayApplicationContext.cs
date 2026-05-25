@@ -47,6 +47,11 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly AppSettings _settings;
     private readonly TrayIcon _anchor;
     private Icon? _anchorIcon;
+    private readonly DetailsForm _detailsForm;
+
+    private UsageSnapshot? _claudeSnap;
+    private UsageSnapshot? _codexSnap;
+    private UsageSnapshot? _cursorSnap;
 
     private int _baseIntervalMs;
     private int _claudeRetryCount;
@@ -81,6 +86,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Frame colors echo the brand icons: Claude = orange, Codex = blue, Cursor = monochrome dark;
         // the shorter window uses the brighter shade, the longer one the deeper shade.
         Func<bool> notifyEnabled = () => _settings.EnableThresholdNotifications;
+        Action onLeftClick = HandleLeftClick;
 
         _claudeIcons = new ProviderIcons(
             "Claude",
@@ -89,7 +95,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             ClaudePrimaryGuid,
             ClaudeSecondaryGuid,
             menu,
-            notifyEnabled
+            notifyEnabled,
+            onLeftClick
         );
         _codexIcons = new ProviderIcons(
             "Codex",
@@ -98,7 +105,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             CodexPrimaryGuid,
             CodexSecondaryGuid,
             menu,
-            notifyEnabled
+            notifyEnabled,
+            onLeftClick
         );
         // Cursor's brand mark is monochrome with a slight cool cast; we use a light
         // and a deep cool slate. Avoid going near pure black — it disappears on
@@ -111,7 +119,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             CursorPrimaryGuid,
             CursorSecondaryGuid,
             menu,
-            notifyEnabled
+            notifyEnabled,
+            onLeftClick
         );
 
         _anchorIcon = IconRenderer.Render(Color.FromArgb(100, 100, 100), null, isError: true);
@@ -119,7 +128,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Icon = _anchorIcon,
             Text = "JeekTokenPlanUsage",
+            LeftClick = onLeftClick,
         };
+
+        // The form is reused across opens; UpdateRows rebuilds the rows each
+        // time so the panel can render only the providers the user has enabled.
+        _detailsForm = new DetailsForm();
 
         _claudeIcons.SetVisible(_settings.ShowClaude);
         _codexIcons.SetVisible(_settings.ShowCodex);
@@ -375,7 +389,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             UsageSnapshot snap = await _claude.GetUsageAsync(CancellationToken.None);
             if (_disposed)
                 return;
+            _claudeSnap = snap;
             _claudeIcons.Update(snap);
+            RefreshDetailsIfVisible();
             // Setting Interval restarts the countdown — exactly what we want for
             // adapting cadence (backoff on error, fast-poll right after reset).
             _claudeTimer.Interval = NextClaudeIntervalMs(snap);
@@ -418,8 +434,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         try
         {
             UsageSnapshot snap = await _codex.GetUsageAsync(CancellationToken.None);
-            if (!_disposed)
-                _codexIcons.Update(snap);
+            if (_disposed)
+                return;
+            _codexSnap = snap;
+            _codexIcons.Update(snap);
+            RefreshDetailsIfVisible();
         }
         finally
         {
@@ -435,13 +454,82 @@ public sealed class TrayApplicationContext : ApplicationContext
         try
         {
             UsageSnapshot snap = await _cursor.GetUsageAsync(CancellationToken.None);
-            if (!_disposed)
-                _cursorIcons.Update(snap);
+            if (_disposed)
+                return;
+            _cursorSnap = snap;
+            _cursorIcons.Update(snap);
+            RefreshDetailsIfVisible();
         }
         finally
         {
             _cursorBusy = false;
         }
+    }
+
+    private void HandleLeftClick()
+    {
+        if (_disposed)
+            return;
+        if (_detailsForm.Visible)
+        {
+            _detailsForm.Hide();
+            return;
+        }
+        // After a hook-driven hide (clicking the icon while the popup is open),
+        // the icon's NIN_SELECT arrives next. Without this guard we'd reopen
+        // immediately and make the icon feel un-toggleable.
+        if (_detailsForm.WasRecentlyHidden())
+            return;
+
+        IReadOnlyList<DetailsForm.Entry> entries = BuildDetailsEntries();
+        if (entries.Count == 0)
+            return; // All providers hidden — nothing to show; right-click for menu.
+
+        _detailsForm.ShowAt(Cursor.Position, entries);
+        // Refresh in the background so the popup reflects current state without
+        // forcing the user to wait. RefreshDetailsIfVisible() will repaint rows
+        // as each provider completes.
+        _ = RefreshAllAsync();
+    }
+
+    private void RefreshDetailsIfVisible()
+    {
+        if (_detailsForm is { Visible: true })
+            _detailsForm.UpdateRows(BuildDetailsEntries());
+    }
+
+    private IReadOnlyList<DetailsForm.Entry> BuildDetailsEntries()
+    {
+        var list = new List<DetailsForm.Entry>(6);
+        if (_settings.ShowClaude)
+        {
+            list.Add(BuildEntry("Claude", _claudeIcons, _claudeSnap, primary: true));
+            list.Add(BuildEntry("Claude", _claudeIcons, _claudeSnap, primary: false));
+        }
+        if (_settings.ShowCodex)
+        {
+            list.Add(BuildEntry("Codex", _codexIcons, _codexSnap, primary: true));
+            list.Add(BuildEntry("Codex", _codexIcons, _codexSnap, primary: false));
+        }
+        if (_settings.ShowCursor)
+        {
+            list.Add(BuildEntry("Cursor", _cursorIcons, _cursorSnap, primary: true));
+            list.Add(BuildEntry("Cursor", _cursorIcons, _cursorSnap, primary: false));
+        }
+        return list;
+    }
+
+    private static DetailsForm.Entry BuildEntry(
+        string displayName, ProviderIcons icons, UsageSnapshot? snap, bool primary)
+    {
+        WindowSpec spec = primary ? icons.PrimarySpec : icons.SecondarySpec;
+        UsageMetric? metric = primary ? snap?.FiveHour : snap?.Weekly;
+        return new DetailsForm.Entry(
+            DisplayName: $"{displayName} {spec.Label}",
+            WindowColor: spec.Bg,
+            LongDate: spec.LongDate,
+            Metric: metric,
+            Error: snap?.Error);
     }
 
     private static int ClampPollMinutes(int minutes) =>
@@ -466,6 +554,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _anchor.Visible = false;
             _anchor.Dispose();
             _anchorIcon?.Dispose();
+            _detailsForm.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -507,7 +596,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             Guid primaryGuid,
             Guid secondaryGuid,
             ContextMenuStrip menu,
-            Func<bool> notifyEnabled
+            Func<bool> notifyEnabled,
+            Action onLeftClick
         )
         {
             _displayName = displayName;
@@ -520,13 +610,22 @@ public sealed class TrayApplicationContext : ApplicationContext
             _primaryIcon = IconRenderer.Render(primary.Bg, null, isError: true);
             _secondaryIcon = IconRenderer.Render(secondary.Bg, null, isError: true);
 
-            _primary = new TrayIcon(primaryGuid, menu) { Icon = _primaryIcon, Text = Strings.Tray_Loading };
+            _primary = new TrayIcon(primaryGuid, menu)
+            {
+                Icon = _primaryIcon,
+                Text = Strings.Tray_Loading,
+                LeftClick = onLeftClick,
+            };
             _secondary = new TrayIcon(secondaryGuid, menu)
             {
                 Icon = _secondaryIcon,
                 Text = Strings.Tray_Loading,
+                LeftClick = onLeftClick,
             };
         }
+
+        public WindowSpec PrimarySpec => _primarySpec;
+        public WindowSpec SecondarySpec => _secondarySpec;
 
         public void SetVisible(bool visible)
         {

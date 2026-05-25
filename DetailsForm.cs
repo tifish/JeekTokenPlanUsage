@@ -1,0 +1,379 @@
+using System.Runtime.InteropServices;
+using JeekTokenPlanUsage.Resources;
+
+namespace JeekTokenPlanUsage;
+
+/// Compact borderless popup that shows all three providers' six windows in one
+/// glance — utilization %, reset time, and any recent error. Left-clicking any
+/// tray icon toggles it; it auto-hides on focus loss or Escape.
+internal sealed class DetailsForm : Form
+{
+    public sealed record Entry(
+        string DisplayName,
+        Color WindowColor,
+        bool LongDate,
+        UsageMetric? Metric,
+        string? Error);
+
+    private const int IndicatorSize = 10;
+    private const int RowVPad = 4;
+
+    // Mirrors IconRenderer's warn threshold so the popup and icon flag the same
+    // window as "hot". Danger is escalated at 95 to call out near-exhaustion.
+    private const double WarnPercent = 80;
+    private const double DangerPercent = 95;
+
+    private static readonly Color WarnOrange = Color.FromArgb(210, 130, 0);
+    private static readonly Color DangerRed = Color.FromArgb(200, 30, 30);
+    private static readonly Color MutedText = Color.FromArgb(110, 110, 110);
+    private static readonly Color BorderColor = Color.FromArgb(180, 180, 180);
+
+    private readonly TableLayoutPanel _table;
+    private readonly List<Row> _rows = new();
+    private Font? _boldFont;
+    private DateTime _lastHideUtc = DateTime.MinValue;
+
+    private sealed class Row
+    {
+        public Panel Indicator = null!;
+        public Label Name = null!;
+        public Label Value = null!;
+        public Label Reset = null!;
+        public string DisplayName = string.Empty;
+    }
+
+    // Held as a field so the GC can't collect the delegate while the OS still
+    // has it registered as the hook callback.
+    private LowLevelMouseProc? _hookProc;
+    private IntPtr _hookId = IntPtr.Zero;
+
+    public DetailsForm()
+    {
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        StartPosition = FormStartPosition.Manual;
+        BackColor = SystemColors.Window;
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        KeyPreview = true;
+        Padding = new Padding(10, 8, 10, 8);
+        DoubleBuffered = true;
+
+        _table = new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 4,
+            Dock = DockStyle.Fill,
+        };
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        Controls.Add(_table);
+
+        KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Escape)
+                Hide();
+        };
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (!Visible)
+        {
+            _lastHideUtc = DateTime.UtcNow;
+            UninstallMouseHook();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            UninstallMouseHook();
+            _boldFont?.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    /// True if the form was hidden within the last `withinMs` milliseconds.
+    /// Used to suppress the immediate "click the icon while popup is open"
+    /// reopen — the mouse hook hides the form on the click-down, then the
+    /// shell's NIN_SELECT lands on button-up. Without this guard the icon
+    /// would feel un-toggleable.
+    public bool WasRecentlyHidden(int withinMs = 250) =>
+        (DateTime.UtcNow - _lastHideUtc).TotalMilliseconds < withinMs;
+
+    public void UpdateRows(IReadOnlyList<Entry> entries)
+    {
+        _boldFont ??= new Font(Font, FontStyle.Bold);
+
+        // Only the value labels actually change between refreshes; the row
+        // structure (which providers, in what order) is set when the user
+        // opens the popup. Rebuilding 24 controls every poll caused the
+        // TableLayoutPanel to mis-lay-out and collapse the form.
+        if (StructureMatches(entries))
+        {
+            for (int i = 0; i < entries.Count; i++)
+                ApplyValues(_rows[i], entries[i]);
+            return;
+        }
+
+        Rebuild(entries);
+    }
+
+    private bool StructureMatches(IReadOnlyList<Entry> entries)
+    {
+        if (entries.Count != _rows.Count)
+            return false;
+        for (int i = 0; i < entries.Count; i++)
+            if (entries[i].DisplayName != _rows[i].DisplayName)
+                return false;
+        return true;
+    }
+
+    private void Rebuild(IReadOnlyList<Entry> entries)
+    {
+        SuspendLayout();
+        _table.SuspendLayout();
+
+        // Snapshot first, then clear, then dispose — Dispose() removes the
+        // control from its parent, which would mutate the collection mid-
+        // iteration if we disposed inside a foreach over _table.Controls.
+        Control[] old = _table.Controls.Cast<Control>().ToArray();
+        _table.Controls.Clear();
+        _table.RowStyles.Clear();
+        foreach (Control c in old)
+            c.Dispose();
+        _rows.Clear();
+
+        _table.RowCount = Math.Max(entries.Count, 1);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            _table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            Row row = CreateRow(entries[i]);
+            _table.Controls.Add(row.Indicator, 0, i);
+            _table.Controls.Add(row.Name, 1, i);
+            _table.Controls.Add(row.Value, 2, i);
+            _table.Controls.Add(row.Reset, 3, i);
+            _rows.Add(row);
+        }
+
+        _table.ResumeLayout(performLayout: true);
+        ResumeLayout(performLayout: true);
+    }
+
+    public void ShowAt(Point cursor, IReadOnlyList<Entry> entries)
+    {
+        UpdateRows(entries);
+        Rectangle screen = Screen.FromPoint(cursor).WorkingArea;
+        // PreferredSize is computed before the window is shown, accounting for
+        // the just-applied row content.
+        Size size = PreferredSize;
+        int x = cursor.X - size.Width / 2;
+        x = Math.Clamp(x, screen.Left + 8, screen.Right - size.Width - 8);
+        int y = cursor.Y - size.Height - 8;
+        if (y < screen.Top + 8)
+            y = cursor.Y + 24;
+        Location = new Point(x, y);
+        Show();
+        ForceForeground();
+        InstallMouseHook();
+    }
+
+    // Tray clicks never grant our form true input activation, so we can't rely
+    // on Form.Deactivate to dismiss the popup — it only fires after the user
+    // has clicked *into* the form once. A low-level mouse hook lets us watch
+    // global button-down events without consuming them: clicks outside our
+    // bounds hide the popup, clicks inside the form fall through normally,
+    // and the target window of an outside click still receives the input.
+    private void InstallMouseHook()
+    {
+        if (_hookId != IntPtr.Zero)
+            return;
+        _hookProc = OnMouseHook;
+        _hookId = SetWindowsHookEx(WH_MOUSE_LL, _hookProc, GetModuleHandleW(null), 0);
+    }
+
+    private void UninstallMouseHook()
+    {
+        if (_hookId == IntPtr.Zero)
+            return;
+        UnhookWindowsHookEx(_hookId);
+        _hookId = IntPtr.Zero;
+        _hookProc = null;
+    }
+
+    private IntPtr OnMouseHook(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0)
+        {
+            int msg = (int)wParam;
+            if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN ||
+                msg == WM_MBUTTONDOWN || msg == WM_NCLBUTTONDOWN)
+            {
+                MSLLHOOKSTRUCT data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                if (!Bounds.Contains(data.pt.X, data.pt.Y))
+                {
+                    // BeginInvoke so we don't tie up the hook callback — Windows
+                    // will silently unhook us if a callback exceeds its budget.
+                    BeginInvoke(new Action(Hide));
+                }
+            }
+        }
+        return CallNextHookEx(_hookId, nCode, wParam, lParam);
+    }
+
+    // Tray icons don't transfer foreground to our process when clicked, so a
+    // plain Show()/Activate() leaves the form visible-but-unfocused — and the
+    // shell promptly steals focus back, firing Deactivate and hiding the popup
+    // before the user sees it. Attaching to the current foreground thread's
+    // input queue bypasses Windows' foreground-stealing prevention long enough
+    // for SetForegroundWindow to actually stick.
+    private void ForceForeground()
+    {
+        IntPtr fore = GetForegroundWindow();
+        if (fore == Handle)
+            return;
+
+        uint foreThread = GetWindowThreadProcessId(fore, out _);
+        uint currentThread = GetCurrentThreadId();
+        if (foreThread == 0 || foreThread == currentThread)
+        {
+            SetForegroundWindow(Handle);
+            return;
+        }
+
+        AttachThreadInput(foreThread, currentThread, true);
+        try { SetForegroundWindow(Handle); }
+        finally { AttachThreadInput(foreThread, currentThread, false); }
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_MBUTTONDOWN = 0x0207;
+    private const int WM_NCLBUTTONDOWN = 0x00A1;
+
+    private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandleW(string? lpModuleName);
+
+    private Row CreateRow(Entry e)
+    {
+        var row = new Row
+        {
+            DisplayName = e.DisplayName,
+            Indicator = new Panel
+            {
+                Size = new Size(IndicatorSize, IndicatorSize),
+                Margin = new Padding(0, RowVPad + 5, 8, RowVPad),
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+            },
+            Name = new Label
+            {
+                AutoSize = true,
+                Margin = new Padding(0, RowVPad, 16, RowVPad),
+                Text = e.DisplayName,
+            },
+            Value = new Label
+            {
+                AutoSize = true,
+                Margin = new Padding(0, RowVPad, 16, RowVPad),
+            },
+            Reset = new Label
+            {
+                AutoSize = true,
+                Margin = new Padding(0, RowVPad, 0, RowVPad),
+                ForeColor = MutedText,
+            },
+        };
+        ApplyValues(row, e);
+        return row;
+    }
+
+    private void ApplyValues(Row row, Entry e)
+    {
+        row.Indicator.BackColor = e.WindowColor;
+
+        if (e.Error is not null)
+        {
+            row.Value.Text = e.Error;
+            row.Value.ForeColor = DangerRed;
+            row.Value.Font = Font;
+            row.Reset.Text = string.Empty;
+        }
+        else if (e.Metric is null)
+        {
+            row.Value.Text = Strings.Tray_NoData;
+            row.Value.ForeColor = MutedText;
+            row.Value.Font = Font;
+            row.Reset.Text = string.Empty;
+        }
+        else
+        {
+            double util = e.Metric.Utilization;
+            row.Value.Text = $"{util:0.#}%";
+            row.Value.Font = _boldFont ?? Font;
+            row.Value.ForeColor =
+                util >= DangerPercent ? DangerRed
+                : util >= WarnPercent ? WarnOrange
+                : SystemColors.ControlText;
+            row.Reset.Text = UsageFormatting.FormatReset(e.Metric.ResetsAt, e.LongDate);
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using var pen = new Pen(BorderColor);
+        Rectangle r = ClientRectangle;
+        e.Graphics.DrawRectangle(pen, 0, 0, r.Width - 1, r.Height - 1);
+    }
+}
