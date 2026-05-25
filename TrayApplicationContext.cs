@@ -70,6 +70,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _showClaudeItem = null!;
     private ToolStripMenuItem _showCodexItem = null!;
     private ToolStripMenuItem _showCursorItem = null!;
+    private ToolStripMenuItem _iconDisplayParent = null!;
     private ToolStripMenuItem _intervalParent = null!;
     private ToolStripMenuItem _languageItem = null!;
     private ToolStripMenuItem _languageAutoItem = null!;
@@ -92,6 +93,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             "Claude",
             new WindowSpec(Color.FromArgb(255, 146, 48), "5h", LongDate: false),
             new WindowSpec(Color.FromArgb(198, 93, 20), Strings.Tray_WeeklyLabel, LongDate: true),
+            SingleModeWindow.Primary,
             ClaudePrimaryGuid,
             ClaudeSecondaryGuid,
             menu,
@@ -102,6 +104,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             "Codex",
             new WindowSpec(Color.FromArgb(64, 140, 255), "5h", LongDate: false),
             new WindowSpec(Color.FromArgb(30, 85, 200), Strings.Tray_WeeklyLabel, LongDate: true),
+            SingleModeWindow.Primary,
             CodexPrimaryGuid,
             CodexSecondaryGuid,
             menu,
@@ -111,11 +114,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Cursor's brand mark is monochrome with a slight cool cast; we use a light
         // and a deep cool slate. Avoid going near pure black — it disappears on
         // dark taskbars. Both pools reset on the monthly billing cycle, so both
-        // use the long (MM-dd) date format.
+        // use the long (MM-dd) date format. In single-icon mode we surface API
+        // (the paid pool) since Auto rarely runs out for most plans.
         _cursorIcons = new ProviderIcons(
             "Cursor",
             new WindowSpec(Color.FromArgb(170, 175, 190), "Auto", LongDate: true),
             new WindowSpec(Color.FromArgb(85, 95, 120), "API", LongDate: true),
+            SingleModeWindow.Secondary,
             CursorPrimaryGuid,
             CursorSecondaryGuid,
             menu,
@@ -135,9 +140,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         // time so the panel can render only the providers the user has enabled.
         _detailsForm = new DetailsForm();
 
-        _claudeIcons.SetVisible(_settings.ShowClaude);
-        _codexIcons.SetVisible(_settings.ShowCodex);
-        _cursorIcons.SetVisible(_settings.ShowCursor);
+        _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
+        _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
+        _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
         UpdateAnchor();
 
         _claudeTimer = new WinTimer { Interval = _baseIntervalMs };
@@ -149,6 +154,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _cursorTimer = new WinTimer { Interval = _baseIntervalMs };
         _cursorTimer.Tick += async (_, _) => await RefreshCursorAsync();
 
+        WireIconDisplayMenu();
         WireIntervalMenu();
         WireLanguageMenu();
         ApplyTimers();
@@ -175,7 +181,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.ShowClaude = next;
             _settings.Save();
             _showClaudeItem.Checked = next;
-            _claudeIcons.SetVisible(next);
+            _claudeIcons.ApplyMode(EffectiveMode(next));
             ApplyTimers();
             UpdateAnchor();
             if (next)
@@ -189,7 +195,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.ShowCodex = next;
             _settings.Save();
             _showCodexItem.Checked = next;
-            _codexIcons.SetVisible(next);
+            _codexIcons.ApplyMode(EffectiveMode(next));
             ApplyTimers();
             UpdateAnchor();
             if (next)
@@ -203,7 +209,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.ShowCursor = next;
             _settings.Save();
             _showCursorItem.Checked = next;
-            _cursorIcons.SetVisible(next);
+            _cursorIcons.ApplyMode(EffectiveMode(next));
             ApplyTimers();
             UpdateAnchor();
             if (next)
@@ -222,8 +228,13 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void UpdateAnchor()
     {
-        _anchor.Visible = !_settings.ShowClaude && !_settings.ShowCodex && !_settings.ShowCursor;
+        bool anyIcon = _settings.IconMode != IconDisplayMode.None
+            && (_settings.ShowClaude || _settings.ShowCodex || _settings.ShowCursor);
+        _anchor.Visible = !anyIcon;
     }
+
+    private IconDisplayMode EffectiveMode(bool providerEnabled) =>
+        providerEnabled ? _settings.IconMode : IconDisplayMode.None;
 
     private void ApplyTimers()
     {
@@ -241,6 +252,28 @@ public sealed class TrayApplicationContext : ApplicationContext
             _cursorTimer.Start();
         else
             _cursorTimer.Stop();
+    }
+
+    private void WireIconDisplayMenu()
+    {
+        foreach (ToolStripItem raw in _iconDisplayParent.DropDownItems)
+        {
+            if (raw is not ToolStripMenuItem item || item.Tag is not IconDisplayMode mode)
+                continue;
+            item.Checked = (mode == _settings.IconMode);
+            item.Click += (_, _) =>
+            {
+                _settings.IconMode = mode;
+                _settings.Save();
+                foreach (ToolStripItem sibling in _iconDisplayParent.DropDownItems)
+                    if (sibling is ToolStripMenuItem mi)
+                        mi.Checked = ReferenceEquals(mi, item);
+                _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
+                _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
+                _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
+                UpdateAnchor();
+            };
+        }
     }
 
     private void WireIntervalMenu()
@@ -303,11 +336,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         _showClaudeItem.Text = Strings.Menu_ShowClaude;
         _showCodexItem.Text = Strings.Menu_ShowCodex;
         _showCursorItem.Text = Strings.Menu_ShowCursor;
+        _iconDisplayParent.Text = Strings.Menu_IconDisplay;
         _intervalParent.Text = Strings.Menu_RefreshInterval;
         _languageItem.Text = Strings.Menu_Language;
         _languageAutoItem.Text = Strings.Menu_LanguageAuto;
         _notifyItem.Text = Strings.Menu_EnableNotifications;
         _exitItem.Text = Strings.Menu_Exit;
+        foreach (ToolStripItem raw in _iconDisplayParent.DropDownItems)
+            if (raw is ToolStripMenuItem mi && mi.Tag is IconDisplayMode mode)
+                mi.Text = IconDisplayLabel(mode);
         foreach (ToolStripItem raw in _intervalParent.DropDownItems)
             if (raw is ToolStripMenuItem mi && mi.Tag is int minutes)
                 mi.Text = FormatMinutes(minutes);
@@ -317,6 +354,14 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (raw is ToolStripMenuItem mi && mi.Tag is string code)
                 mi.Checked = (code == _settings.Language);
     }
+
+    private static string IconDisplayLabel(IconDisplayMode mode) => mode switch
+    {
+        IconDisplayMode.None => Strings.Menu_IconDisplayNone,
+        IconDisplayMode.Single => Strings.Menu_IconDisplaySingle,
+        IconDisplayMode.Double => Strings.Menu_IconDisplayDouble,
+        _ => mode.ToString(),
+    };
 
     private ContextMenuStrip BuildMenu()
     {
@@ -329,6 +374,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         _showClaudeItem = new ToolStripMenuItem(Strings.Menu_ShowClaude);
         _showCodexItem = new ToolStripMenuItem(Strings.Menu_ShowCodex);
         _showCursorItem = new ToolStripMenuItem(Strings.Menu_ShowCursor);
+
+        _iconDisplayParent = new ToolStripMenuItem(Strings.Menu_IconDisplay);
+        foreach (IconDisplayMode mode in new[] { IconDisplayMode.None, IconDisplayMode.Single, IconDisplayMode.Double })
+            _iconDisplayParent.DropDownItems.Add(
+                new ToolStripMenuItem(IconDisplayLabel(mode)) { Tag = mode }
+            );
 
         _intervalParent = new ToolStripMenuItem(Strings.Menu_RefreshInterval);
         foreach (int min in AllowedPollMinutes)
@@ -359,6 +410,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_showClaudeItem);
         menu.Items.Add(_showCodexItem);
         menu.Items.Add(_showCursorItem);
+        menu.Items.Add(_iconDisplayParent);
         menu.Items.Add(_intervalParent);
         menu.Items.Add(_languageItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -564,6 +616,10 @@ public sealed class TrayApplicationContext : ApplicationContext
     /// monthly billing cycles) or can omit it (short windows like 5-hour).
     private sealed record WindowSpec(Color Bg, string Label, bool LongDate);
 
+    /// Which of the two windows is the one shown when IconMode = Single. Claude
+    /// and Codex surface 5h (Primary); Cursor surfaces API (Secondary).
+    private enum SingleModeWindow { Primary, Secondary }
+
     /// Tracks the highest threshold (in NotificationThresholds) we've already
     /// notified for the current window cycle. Resets when the window's ResetsAt
     /// changes — i.e., the window rolled over to a new cycle.
@@ -581,6 +637,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         private readonly string _displayName;
         private readonly WindowSpec _primarySpec;
         private readonly WindowSpec _secondarySpec;
+        private readonly SingleModeWindow _singleModeWindow;
         private readonly TrayIcon _primary;
         private readonly TrayIcon _secondary;
         private readonly Func<bool> _notifyEnabled;
@@ -588,11 +645,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         private readonly WindowThresholdState _secondaryThreshold = new();
         private Icon? _primaryIcon;
         private Icon? _secondaryIcon;
+        private IconDisplayMode _mode = IconDisplayMode.Double;
+        private UsageSnapshot? _lastSnap;
 
         public ProviderIcons(
             string displayName,
             WindowSpec primary,
             WindowSpec secondary,
+            SingleModeWindow singleModeWindow,
             Guid primaryGuid,
             Guid secondaryGuid,
             ContextMenuStrip menu,
@@ -603,6 +663,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _displayName = displayName;
             _primarySpec = primary;
             _secondarySpec = secondary;
+            _singleModeWindow = singleModeWindow;
             _notifyEnabled = notifyEnabled;
 
             // Hold the initial placeholder icons in our own fields so the HICON
@@ -627,18 +688,73 @@ public sealed class TrayApplicationContext : ApplicationContext
         public WindowSpec PrimarySpec => _primarySpec;
         public WindowSpec SecondarySpec => _secondarySpec;
 
-        public void SetVisible(bool visible)
+        /// Switches between None / Single / Double. Updates icon content for the
+        /// new mode using the most recent snapshot (if any), then applies tray
+        /// visibility. State first / visibility second ensures the shell never
+        /// renders stale content when an icon becomes visible.
+        public void ApplyMode(IconDisplayMode mode)
         {
-            _primary.Visible = visible;
-            _secondary.Visible = visible;
+            _mode = mode;
+            if (_lastSnap is not null)
+                RenderState(_lastSnap);
+
+            bool primaryVisible = mode == IconDisplayMode.Double
+                || (mode == IconDisplayMode.Single && _singleModeWindow == SingleModeWindow.Primary);
+            bool secondaryVisible = mode == IconDisplayMode.Double
+                || (mode == IconDisplayMode.Single && _singleModeWindow == SingleModeWindow.Secondary);
+            _primary.Visible = primaryVisible;
+            _secondary.Visible = secondaryVisible;
         }
 
         public void Update(UsageSnapshot snap)
         {
-            bool error = snap.Error is not null;
-            ApplyTo(_primary, ref _primaryIcon, _primarySpec, snap.FiveHour, error, snap.Error, _primaryThreshold);
-            ApplyTo(_secondary, ref _secondaryIcon, _secondarySpec, snap.Weekly, error, snap.Error, _secondaryThreshold);
+            _lastSnap = snap;
+            if (_mode == IconDisplayMode.None)
+                return;
+            RenderState(snap);
         }
+
+        private void RenderState(UsageSnapshot snap)
+        {
+            if (_mode == IconDisplayMode.None)
+                return;
+
+            bool error = snap.Error is not null;
+
+            if (_mode == IconDisplayMode.Double)
+            {
+                ApplyTo(_primary, ref _primaryIcon, _primarySpec, snap.FiveHour, error, snap.Error, _primaryThreshold,
+                    BuildLine(_primarySpec, snap.FiveHour, error, snap.Error));
+                ApplyTo(_secondary, ref _secondaryIcon, _secondarySpec, snap.Weekly, error, snap.Error, _secondaryThreshold,
+                    BuildLine(_secondarySpec, snap.Weekly, error, snap.Error));
+                return;
+            }
+
+            // Single mode: render the chosen icon with a two-line tooltip
+            // showing both windows. Notifications for the hidden window are
+            // routed through the visible icon so threshold alerts still fire.
+            string twoLine = TruncateLine(BuildLine(_primarySpec, snap.FiveHour, error, snap.Error))
+                + "\r\n"
+                + TruncateLine(BuildLine(_secondarySpec, snap.Weekly, error, snap.Error));
+
+            if (_singleModeWindow == SingleModeWindow.Primary)
+            {
+                ApplyTo(_primary, ref _primaryIcon, _primarySpec, snap.FiveHour, error, snap.Error, _primaryThreshold, twoLine);
+                if (!error && snap.Weekly is not null)
+                    CheckThresholds(_primary, _secondarySpec, snap.Weekly, _secondaryThreshold);
+            }
+            else
+            {
+                ApplyTo(_secondary, ref _secondaryIcon, _secondarySpec, snap.Weekly, error, snap.Error, _secondaryThreshold, twoLine);
+                if (!error && snap.FiveHour is not null)
+                    CheckThresholds(_secondary, _primarySpec, snap.FiveHour, _primaryThreshold);
+            }
+        }
+
+        private string BuildLine(WindowSpec spec, UsageMetric? metric, bool error, string? errorText) =>
+            error ? $"{_displayName} {spec.Label}: {errorText}"
+            : metric is null ? $"{_displayName} {spec.Label}: {Strings.Tray_NoData}"
+            : $"{_displayName} {spec.Label}: {metric.Utilization:0.#}% · {FormatReset(metric.ResetsAt, spec.LongDate)}";
 
         private void ApplyTo(
             TrayIcon target,
@@ -647,7 +763,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             UsageMetric? metric,
             bool error,
             string? errorText,
-            WindowThresholdState thresholdState
+            WindowThresholdState thresholdState,
+            string tooltip
         )
         {
             Icon rendered = IconRenderer.Render(
@@ -661,12 +778,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             current?.Dispose();
             current = rendered;
 
-            target.Text =
-                error ? Truncate($"{_displayName} {spec.Label}: {errorText}")
-                : metric is null ? $"{_displayName} {spec.Label}: {Strings.Tray_NoData}"
-                : Truncate(
-                    $"{_displayName} {spec.Label}: {metric.Utilization:0.#}% · {FormatReset(metric.ResetsAt, spec.LongDate)}"
-                );
+            target.Text = Truncate(tooltip);
 
             if (!error && metric is not null)
                 CheckThresholds(target, spec, metric, thresholdState);
@@ -735,7 +847,11 @@ public sealed class TrayApplicationContext : ApplicationContext
             return $"{Math.Max(1, minutes)}m";
         }
 
-        private static string Truncate(string s) => s.Length <= 63 ? s : s[..63];
+        // NIF_TIP allows up to 127 wchars (TrayIcon enforces the hard cap);
+        // single-icon two-line tooltips need the headroom. Per-line truncation
+        // keeps both lines visible when one is unusually long (e.g. error text).
+        private static string Truncate(string s) => s.Length <= 127 ? s : s[..127];
+        private static string TruncateLine(string s) => s.Length <= 60 ? s : s[..60];
 
         public void Dispose()
         {

@@ -27,6 +27,18 @@
   <data name="Menu_ShowCursor" xml:space="preserve">
     <value>显示 Cursor 用量</value>
   </data>
+  <data name="Menu_IconDisplay" xml:space="preserve">
+    <value>图标显示</value>
+  </data>
+  <data name="Menu_IconDisplayNone" xml:space="preserve">
+    <value>不显示</value>
+  </data>
+  <data name="Menu_IconDisplaySingle" xml:space="preserve">
+    <value>每种一个</value>
+  </data>
+  <data name="Menu_IconDisplayDouble" xml:space="preserve">
+    <value>每种两个</value>
+  </data>
   <data name="Menu_RefreshInterval" xml:space="preserve">
     <value>刷新间隔</value>
   </data>

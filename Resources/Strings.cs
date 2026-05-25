@@ -19,6 +19,10 @@ internal static class Strings
     public static string Menu_ShowClaude => Get(nameof(Menu_ShowClaude));
     public static string Menu_ShowCodex => Get(nameof(Menu_ShowCodex));
     public static string Menu_ShowCursor => Get(nameof(Menu_ShowCursor));
+    public static string Menu_IconDisplay => Get(nameof(Menu_IconDisplay));
+    public static string Menu_IconDisplayNone => Get(nameof(Menu_IconDisplayNone));
+    public static string Menu_IconDisplaySingle => Get(nameof(Menu_IconDisplaySingle));
+    public static string Menu_IconDisplayDouble => Get(nameof(Menu_IconDisplayDouble));
     public static string Menu_RefreshInterval => Get(nameof(Menu_RefreshInterval));
     public static string Menu_Language => Get(nameof(Menu_Language));
     public static string Menu_LanguageAuto => Get(nameof(Menu_LanguageAuto));

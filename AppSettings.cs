@@ -4,6 +4,18 @@ using Microsoft.Win32;
 
 namespace JeekTokenPlanUsage;
 
+/// How many tray icons each enabled provider contributes.
+///   None — no per-provider icons; only the anchor stays visible.
+///   Single — one icon per provider (Claude/Codex show 5h, Cursor shows API);
+///            the tooltip lists both windows on two lines.
+///   Double — separate icons for each window (default).
+public enum IconDisplayMode
+{
+    None = 0,
+    Single = 1,
+    Double = 2,
+}
+
 internal sealed class AppSettings
 {
     private static readonly string SettingsPath = Path.Combine(
@@ -18,6 +30,11 @@ internal sealed class AppSettings
     public bool ShowClaude { get; set; } = true;
     public bool ShowCodex { get; set; } = true;
     public bool ShowCursor { get; set; } = true;
+
+    /// How many icons each enabled provider shows in the tray. Persisted as a
+    /// string so the settings file stays human-readable.
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public IconDisplayMode IconMode { get; set; } = IconDisplayMode.Double;
 
     /// Base polling interval shared by all three providers (minutes). Allowed:
     /// 1, 5, 10, 30, 60. Claude's poll may hit the messages-API fallback which
