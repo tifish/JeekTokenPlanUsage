@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using JeekTokenPlanUsage.Resources;
 using WinTimer = System.Windows.Forms.Timer;
 
@@ -48,6 +49,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly TrayIcon _anchor;
     private Icon? _anchorIcon;
     private readonly DetailsForm _detailsForm;
+    private readonly TaskbarWidget _taskbarWidget;
+    private readonly ThemeChangeListener _themeListener;
 
     private UsageSnapshot? _claudeSnap;
     private UsageSnapshot? _codexSnap;
@@ -75,6 +78,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _languageItem = null!;
     private ToolStripMenuItem _languageAutoItem = null!;
     private ToolStripMenuItem _notifyItem = null!;
+    private ToolStripMenuItem _widgetItem = null!;
     private ToolStripMenuItem _exitItem = null!;
 
     public TrayApplicationContext()
@@ -140,10 +144,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         // time so the panel can render only the providers the user has enabled.
         _detailsForm = new DetailsForm();
 
+        _taskbarWidget = new TaskbarWidget(
+            menu, onLeftClick, OnWidgetOffsetChanged, _settings.TaskbarWidgetOffset);
+
+        // Repaint every theme-aware surface the instant the OS toggles light/dark.
+        _themeListener = new ThemeChangeListener(OnSystemThemeChanged);
+
         _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
         _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
         _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
         UpdateAnchor();
+        _taskbarWidget.Visible = _settings.ShowTaskbarWidget;
 
         _claudeTimer = new WinTimer { Interval = _baseIntervalMs };
         _claudeTimer.Tick += async (_, _) => await RefreshClaudeAsync();
@@ -184,6 +195,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _claudeIcons.ApplyMode(EffectiveMode(next));
             ApplyTimers();
             UpdateAnchor();
+            UpdateWidget();
             if (next)
                 await RefreshClaudeAsync();
         };
@@ -198,6 +210,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _codexIcons.ApplyMode(EffectiveMode(next));
             ApplyTimers();
             UpdateAnchor();
+            UpdateWidget();
             if (next)
                 await RefreshCodexAsync();
         };
@@ -212,6 +225,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _cursorIcons.ApplyMode(EffectiveMode(next));
             ApplyTimers();
             UpdateAnchor();
+            UpdateWidget();
             if (next)
                 await RefreshCursorAsync();
         };
@@ -224,6 +238,39 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.Save();
             _notifyItem.Checked = next;
         };
+
+        _widgetItem.Checked = _settings.ShowTaskbarWidget;
+        _widgetItem.Click += (_, _) =>
+        {
+            bool next = !_widgetItem.Checked;
+            _settings.ShowTaskbarWidget = next;
+            _settings.Save();
+            _widgetItem.Checked = next;
+            _taskbarWidget.Visible = next;
+            if (next)
+                UpdateWidget();
+        };
+    }
+
+    private void OnWidgetOffsetChanged(int offset)
+    {
+        _settings.TaskbarWidgetOffset = offset;
+        _settings.Save();
+    }
+
+    // Fired (on the UI thread) when Windows broadcasts a light/dark switch. Repaint
+    // the theme-aware surfaces at once; the tray icons are re-rendered on the next
+    // poll and the context menu re-themes when next shown.
+    private void OnSystemThemeChanged()
+    {
+        if (_disposed)
+            return;
+        // Re-applying System color mode re-maps SystemColors (Window/ControlText/…)
+        // to the new theme — they're otherwise frozen at their startup values — and
+        // lets WinForms re-theme its controls/menus. Then repaint our surfaces.
+        try { Application.SetColorMode(SystemColorMode.System); } catch { }
+        _detailsForm.NotifyThemeChanged();
+        _taskbarWidget.NotifyThemeChanged();
     }
 
     private void UpdateAnchor()
@@ -341,6 +388,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _languageItem.Text = Strings.Menu_Language;
         _languageAutoItem.Text = Strings.Menu_LanguageAuto;
         _notifyItem.Text = Strings.Menu_EnableNotifications;
+        _widgetItem.Text = Strings.Menu_ShowTaskbarWidget;
         _exitItem.Text = Strings.Menu_Exit;
         foreach (ToolStripItem raw in _iconDisplayParent.DropDownItems)
             if (raw is ToolStripMenuItem mi && mi.Tag is IconDisplayMode mode)
@@ -365,6 +413,10 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private ContextMenuStrip BuildMenu()
     {
+        // Drive menu colors from the live system theme (covers the menu and all its
+        // submenus) so a runtime light/dark switch is reflected on the next open.
+        ToolStripManager.Renderer = new ThemedMenuRenderer();
+
         var menu = new ContextMenuStrip();
 
         _refreshItem = new ToolStripMenuItem(Strings.Menu_RefreshNow);
@@ -398,6 +450,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _languageItem.DropDownItems.Add(new ToolStripMenuItem("English") { Tag = "en" });
 
         _notifyItem = new ToolStripMenuItem(Strings.Menu_EnableNotifications);
+        _widgetItem = new ToolStripMenuItem(Strings.Menu_ShowTaskbarWidget);
 
         _exitItem = new ToolStripMenuItem(Strings.Menu_Exit);
         _exitItem.Click += (_, _) => ExitThread();
@@ -406,6 +459,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_startupItem);
         menu.Items.Add(_notifyItem);
+        menu.Items.Add(_widgetItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_showClaudeItem);
         menu.Items.Add(_showCodexItem);
@@ -548,7 +602,47 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (_detailsForm is { Visible: true })
             _detailsForm.UpdateRows(BuildDetailsEntries());
+        UpdateWidget();
     }
+
+    private void UpdateWidget()
+    {
+        if (!_settings.ShowTaskbarWidget)
+            return;
+        _taskbarWidget.Update(BuildWidgetColumns());
+    }
+
+    private IReadOnlyList<TaskbarWidget.Column> BuildWidgetColumns()
+    {
+        var list = new List<TaskbarWidget.Column>(3);
+        if (_settings.ShowClaude)
+            list.Add(BuildColumn(_claudeIcons, _claudeSnap));
+        if (_settings.ShowCodex)
+            list.Add(BuildColumn(_codexIcons, _codexSnap));
+        if (_settings.ShowCursor)
+            list.Add(BuildColumn(_cursorIcons, _cursorSnap));
+        return list;
+    }
+
+    private static TaskbarWidget.Column BuildColumn(ProviderIcons icons, UsageSnapshot? snap)
+    {
+        // Both rows' labels use the primary (bright) accent so the secondary row's
+        // deeper shade doesn't render as hard-to-read text on the taskbar.
+        Color labelColor = icons.PrimarySpec.Bg;
+        return new(
+            BuildCell(icons.PrimarySpec, labelColor, snap?.FiveHour, snap?.Error),
+            BuildCell(icons.SecondarySpec, labelColor, snap?.Weekly, snap?.Error));
+    }
+
+    private static TaskbarWidget.Cell BuildCell(
+        WindowSpec spec, Color labelColor, UsageMetric? metric, string? error) =>
+        new(
+            Label: spec.Label,
+            LabelColor: labelColor,
+            Accent: spec.Bg,
+            Percent: error is null ? metric?.Utilization : null,
+            IsError: error is not null,
+            ResetsAt: error is null ? metric?.ResetsAt : null);
 
     private IReadOnlyList<DetailsForm.Entry> BuildDetailsEntries()
     {
@@ -607,6 +701,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _anchor.Dispose();
             _anchorIcon?.Dispose();
             _detailsForm.Dispose();
+            _taskbarWidget.Dispose();
+            _themeListener.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -615,6 +711,41 @@ public sealed class TrayApplicationContext : ApplicationContext
     /// and whether the reset time needs a date prefix (long windows like weekly or
     /// monthly billing cycles) or can omit it (short windows like 5-hour).
     private sealed record WindowSpec(Color Bg, string Label, bool LongDate);
+
+    /// Hidden top-level window that listens for the system light/dark switch.
+    /// Windows broadcasts WM_SETTINGCHANGE("ImmersiveColorSet") (and WM_THEMECHANGED)
+    /// to top-level windows only — our embedded taskbar widget is a child window and
+    /// wouldn't receive it, so we watch here and fan the notification out. The handle
+    /// is created on the UI thread, so WndProc (and the callback) run there too.
+    private sealed class ThemeChangeListener : NativeWindow, IDisposable
+    {
+        private const int WM_SETTINGCHANGE = 0x001A;
+        private const int WM_THEMECHANGED = 0x031A;
+
+        private readonly Action _onChange;
+
+        public ThemeChangeListener(Action onChange)
+        {
+            _onChange = onChange;
+            CreateHandle(new CreateParams { Caption = "JeekThemeWatcher" });
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_THEMECHANGED)
+            {
+                _onChange();
+            }
+            else if (m.Msg == WM_SETTINGCHANGE && m.LParam != IntPtr.Zero
+                && Marshal.PtrToStringUni(m.LParam) == "ImmersiveColorSet")
+            {
+                _onChange();
+            }
+            base.WndProc(ref m);
+        }
+
+        public void Dispose() => DestroyHandle();
+    }
 
     /// Which of the two windows is the one shown when IconMode = Single. Claude
     /// and Codex surface 5h (Primary); Cursor surfaces API (Secondary).

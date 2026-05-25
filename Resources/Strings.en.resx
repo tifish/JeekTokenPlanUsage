@@ -51,6 +51,9 @@
   <data name="Menu_EnableNotifications" xml:space="preserve">
     <value>Enable threshold notifications</value>
   </data>
+  <data name="Menu_ShowTaskbarWidget" xml:space="preserve">
+    <value>Show widget on taskbar</value>
+  </data>
   <data name="Menu_Exit" xml:space="preserve">
     <value>Exit</value>
   </data>

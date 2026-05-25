@@ -50,6 +50,15 @@ internal sealed class AppSettings
     /// Each (window, threshold) only fires once per window cycle.
     public bool EnableThresholdNotifications { get; set; } = true;
 
+    /// Show an embedded widget on the taskbar (progress bars + percentages),
+    /// in addition to / instead of the tray icons. Off by default so existing
+    /// users keep the tray-only behavior until they opt in.
+    public bool ShowTaskbarWidget { get; set; } = false;
+
+    /// Horizontal gap (device-independent px) between the widget's right edge
+    /// and the tray notification area. Adjusted by dragging the widget.
+    public int TaskbarWidgetOffset { get; set; } = 0;
+
     /// Legacy field retained only for one-shot migration from older
     /// settings.json files. New writes leave it at 0; see Load().
     public int ClaudePollMinutes { get; set; }

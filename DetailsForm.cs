@@ -19,30 +19,27 @@ internal sealed class DetailsForm : Form
     private const int RowVPad = 4;
 
     // Mirrors IconRenderer's warn threshold so the popup and icon flag the same
-    // window as "hot". Danger is escalated at 95 to call out near-exhaustion.
+    // window as "hot" (in the tray icon's amber).
     private const double WarnPercent = 80;
-    private const double DangerPercent = 95;
 
-    // Accent colors stay readable on both light and dark backgrounds; the
-    // muted/border greys flip with the system theme so they keep adequate
-    // contrast against SystemColors.Window in either mode.
-    private static Color WarnOrange => Application.IsDarkModeEnabled
-        ? Color.FromArgb(240, 165, 50)
-        : Color.FromArgb(210, 130, 0);
-    private static Color DangerRed => Application.IsDarkModeEnabled
+    // Background / text / muted / border come from SystemColors, which TrayApplicationContext
+    // keeps live by re-applying Application.SetColorMode on each OS theme switch.
+    // Usage-warning and error have no system equivalent, so they're explicit and
+    // follow the (live) Application.IsDarkModeEnabled — warning matches the tray icon's amber.
+    private static Color WarnText => Application.IsDarkModeEnabled
+        ? Color.FromArgb(255, 214, 10)
+        : Color.FromArgb(160, 120, 0);
+    private static Color ErrorText => Application.IsDarkModeEnabled
         ? Color.FromArgb(235, 90, 90)
         : Color.FromArgb(200, 30, 30);
-    private static Color MutedText => Application.IsDarkModeEnabled
-        ? Color.FromArgb(170, 170, 170)
-        : Color.FromArgb(110, 110, 110);
-    private static Color BorderColor => Application.IsDarkModeEnabled
-        ? Color.FromArgb(80, 80, 80)
-        : Color.FromArgb(180, 180, 180);
+    private static Color MutedText => SystemColors.GrayText;
+    private static Color BorderColor => SystemColors.ControlDark;
 
     private readonly TableLayoutPanel _table;
     private readonly List<Row> _rows = new();
     private Font? _boldFont;
     private DateTime _lastHideUtc = DateTime.MinValue;
+    private IReadOnlyList<Entry> _lastEntries = Array.Empty<Entry>();
 
     private sealed class Row
     {
@@ -65,6 +62,7 @@ internal sealed class DetailsForm : Form
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
         BackColor = SystemColors.Window;
+        ForeColor = SystemColors.ControlText;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         KeyPreview = true;
@@ -120,8 +118,19 @@ internal sealed class DetailsForm : Form
     public bool WasRecentlyHidden(int withinMs = 250) =>
         (DateTime.UtcNow - _lastHideUtc).TotalMilliseconds < withinMs;
 
+    /// Re-applies theme-dependent colors after a system light/dark switch. Updates
+    /// even when hidden so the next open is already correct.
+    public void NotifyThemeChanged()
+    {
+        BackColor = SystemColors.Window;
+        ForeColor = SystemColors.ControlText;
+        UpdateRows(_lastEntries);
+        Invalidate(true);
+    }
+
     public void UpdateRows(IReadOnlyList<Entry> entries)
     {
+        _lastEntries = entries;
         _boldFont ??= new Font(Font, FontStyle.Bold);
 
         // Only the value labels actually change between refreshes; the row
@@ -342,7 +351,8 @@ internal sealed class DetailsForm : Form
             {
                 AutoSize = true,
                 Margin = new Padding(0, RowVPad, 0, RowVPad),
-                ForeColor = MutedText,
+                // No explicit color: inherit the form's ControlText (default) so the
+                // reset/time text isn't muted and follows the theme on a live switch.
             },
         };
         ApplyValues(row, e);
@@ -356,7 +366,7 @@ internal sealed class DetailsForm : Form
         if (e.Error is not null)
         {
             row.Value.Text = e.Error;
-            row.Value.ForeColor = DangerRed;
+            row.Value.ForeColor = ErrorText;
             row.Value.Font = Font;
             row.Reset.Text = string.Empty;
         }
@@ -372,10 +382,7 @@ internal sealed class DetailsForm : Form
             double util = e.Metric.Utilization;
             row.Value.Text = $"{util:0.#}%";
             row.Value.Font = _boldFont ?? Font;
-            row.Value.ForeColor =
-                util >= DangerPercent ? DangerRed
-                : util >= WarnPercent ? WarnOrange
-                : SystemColors.ControlText;
+            row.Value.ForeColor = util >= WarnPercent ? WarnText : SystemColors.ControlText;
             row.Reset.Text = UsageFormatting.FormatReset(e.Metric.ResetsAt, e.LongDate);
         }
     }

@@ -31,4 +31,17 @@ internal static class UsageFormatting
             return $"{hours}h {minutes}m";
         return $"{Math.Max(1, minutes)}m";
     }
+
+    /// Like FormatRemaining but shows only the largest non-zero unit (e.g. "2d",
+    /// "5h", "45m"), trading precision for width — used by the taskbar widget.
+    public static string FormatRemainingShort(TimeSpan remaining)
+    {
+        if (remaining <= TimeSpan.Zero)
+            return "0m";
+        if (remaining.Days > 0)
+            return $"{remaining.Days}d";
+        if (remaining.Hours > 0)
+            return $"{remaining.Hours}h";
+        return $"{Math.Max(1, remaining.Minutes)}m";
+    }
 }
