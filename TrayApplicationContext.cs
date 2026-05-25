@@ -128,7 +128,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             onLeftClick
         );
 
-        _anchorIcon = IconRenderer.Render(Color.FromArgb(100, 100, 100), null, isError: true);
+        _anchorIcon = IconRenderer.Render(Color.FromArgb(100, 100, 100), null, isError: true, placeholder: "T");
         _anchor = new TrayIcon(AnchorGuid, menu)
         {
             Icon = _anchorIcon,

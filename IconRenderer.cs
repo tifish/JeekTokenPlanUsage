@@ -26,14 +26,14 @@ public static class IconRenderer
     /// Builds an icon whose colored frame identifies the provider/window; the interior
     /// is transparent and the number is drawn white (or red when usage is high) so it
     /// stays legible. The caller owns the returned Icon and must dispose it.
-    public static Icon Render(Color frameColor, double? percent, bool isError)
+    public static Icon Render(Color frameColor, double? percent, bool isError, string placeholder = "--")
     {
         string text;
         Color textColor;
 
         if (isError || percent is null)
         {
-            text = "--";
+            text = placeholder;
             textColor = White;
             frameColor = ErrorFrame;
         }
