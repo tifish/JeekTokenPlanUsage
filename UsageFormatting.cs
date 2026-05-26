@@ -6,16 +6,35 @@ namespace JeekTokenPlanUsage;
 /// surfaces show the same reset/remaining string for any given metric.
 internal static class UsageFormatting
 {
-    public static string FormatReset(DateTimeOffset? reset, bool longDate)
+    public readonly record struct ResetDisplay(string Remaining, string Absolute);
+
+    public static ResetDisplay? FormatResetParts(DateTimeOffset? reset, bool longDate)
     {
         if (reset is null)
-            return "?";
+            return null;
         DateTimeOffset local = reset.Value.ToLocalTime();
         string absolute = longDate ? local.ToString("MM-dd HH:mm") : local.ToString("HH:mm");
+        return new ResetDisplay(FormatRemaining(reset.Value - DateTimeOffset.Now), absolute);
+    }
+
+    public static string FormatReset(DateTimeOffset? reset, bool longDate)
+    {
+        if (FormatResetParts(reset, longDate) is not { } display)
+            return "?";
         return string.Format(
             Strings.Tray_ResetFormat,
-            FormatRemaining(reset.Value - DateTimeOffset.Now),
-            absolute);
+            display.Remaining,
+            display.Absolute);
+    }
+
+    public static string FormatResetAligned(DateTimeOffset? reset, bool longDate, int remainingWidth)
+    {
+        if (FormatResetParts(reset, longDate) is not { } display)
+            return "?";
+        return string.Format(
+            Strings.Tray_ResetFormat,
+            display.Remaining.PadRight(remainingWidth),
+            display.Absolute);
     }
 
     public static string FormatRemaining(TimeSpan remaining)

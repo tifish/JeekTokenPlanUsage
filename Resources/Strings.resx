@@ -70,7 +70,7 @@
     <value>no data</value>
   </data>
   <data name="Tray_ResetFormat" xml:space="preserve">
-    <value>{0} left · resets {1}</value>
+    <value>{0} · {1}</value>
   </data>
   <data name="Tray_WeeklyLabel" xml:space="preserve">
     <value>7d</value>

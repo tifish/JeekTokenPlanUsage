@@ -859,7 +859,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         WindowSpec spec = primary ? icons.PrimarySpec : icons.SecondarySpec;
         UsageMetric? metric = primary ? snap?.FiveHour : snap?.Weekly;
         return new DetailsForm.Entry(
-            DisplayName: $"{displayName} {spec.Label}",
+            ProviderName: displayName,
+            WindowLabel: spec.Label,
             WindowColor: spec.Bg,
             LongDate: spec.LongDate,
             Metric: metric,
@@ -952,6 +953,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private sealed class ProviderIcons : IDisposable
     {
         private static readonly int[] NotificationThresholds = { 80, 95 };
+        private const int TooltipRemainingWidth = 7;
 
         private readonly string _displayName;
         private readonly WindowSpec _primarySpec;
@@ -962,6 +964,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         private readonly Func<bool> _notifyEnabled;
         private readonly WindowThresholdState _primaryThreshold = new();
         private readonly WindowThresholdState _secondaryThreshold = new();
+        private readonly int _tooltipWindowLabelWidth;
         private Icon? _primaryIcon;
         private Icon? _secondaryIcon;
         private IconDisplayMode _mode = IconDisplayMode.Double;
@@ -984,6 +987,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _secondarySpec = secondary;
             _singleModeWindow = singleModeWindow;
             _notifyEnabled = notifyEnabled;
+            _tooltipWindowLabelWidth = Math.Max(primary.Label.Length, secondary.Label.Length);
 
             // Hold the initial placeholder icons in our own fields so the HICON
             // stays valid for as long as the shell references it.
@@ -1082,9 +1086,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         private string BuildLine(WindowSpec spec, UsageMetric? metric, bool error, string? errorText) =>
-            error ? $"{_displayName} {spec.Label}: {errorText}"
-            : metric is null ? $"{_displayName} {spec.Label}: {Strings.Tray_NoData}"
-            : $"{_displayName} {spec.Label}: {metric.Utilization:0.#}% · {FormatReset(metric.ResetsAt, spec.LongDate)}";
+            error ? $"{PaddedTooltipLabel(spec)}: {errorText}"
+            : metric is null ? $"{PaddedTooltipLabel(spec)}: {Strings.Tray_NoData}"
+            : $"{PaddedTooltipLabel(spec)}: {metric.Utilization,5:0.#}% · {UsageFormatting.FormatResetAligned(metric.ResetsAt, spec.LongDate, TooltipRemainingWidth)}";
+
+        private string PaddedTooltipLabel(WindowSpec spec) =>
+            $"{_displayName} {spec.Label.PadRight(_tooltipWindowLabelWidth)}";
 
         private void ApplyTo(
             TrayIcon target,
@@ -1148,33 +1155,6 @@ public sealed class TrayApplicationContext : ApplicationContext
                     spec.Label,
                     metric.Utilization.ToString("0.#")));
             state.LastNotifiedThreshold = crossed;
-        }
-
-        private static string FormatReset(DateTimeOffset? reset, bool longDate)
-        {
-            if (reset is null)
-                return "?";
-            DateTimeOffset local = reset.Value.ToLocalTime();
-            string absolute = longDate ? local.ToString("MM-dd HH:mm") : local.ToString("HH:mm");
-            return string.Format(
-                Strings.Tray_ResetFormat,
-                FormatRemaining(reset.Value - DateTimeOffset.Now),
-                absolute
-            );
-        }
-
-        private static string FormatRemaining(TimeSpan remaining)
-        {
-            if (remaining <= TimeSpan.Zero)
-                return "0m";
-            int days = remaining.Days;
-            int hours = remaining.Hours;
-            int minutes = remaining.Minutes;
-            if (days > 0)
-                return $"{days}d {hours}h";
-            if (hours > 0)
-                return $"{hours}h {minutes}m";
-            return $"{Math.Max(1, minutes)}m";
         }
 
         // NIF_TIP allows up to 127 wchars (TrayIcon enforces the hard cap);

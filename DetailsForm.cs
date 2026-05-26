@@ -9,7 +9,8 @@ namespace JeekTokenPlanUsage;
 internal sealed class DetailsForm : Form
 {
     public sealed record Entry(
-        string DisplayName,
+        string ProviderName,
+        string WindowLabel,
         Color WindowColor,
         bool LongDate,
         UsageMetric? Metric,
@@ -45,10 +46,13 @@ internal sealed class DetailsForm : Form
     private sealed class Row
     {
         public Panel Indicator = null!;
-        public Label Name = null!;
+        public Label Provider = null!;
+        public Label Window = null!;
         public Label Value = null!;
-        public Label Reset = null!;
-        public string DisplayName = string.Empty;
+        public Label Remaining = null!;
+        public Label ResetTime = null!;
+        public string ProviderName = string.Empty;
+        public string WindowLabel = string.Empty;
     }
 
     // Held as a field so the GC can't collect the delegate while the OS still
@@ -74,9 +78,11 @@ internal sealed class DetailsForm : Form
         {
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 4,
+            ColumnCount = 6,
             Dock = DockStyle.Fill,
         };
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -153,7 +159,8 @@ internal sealed class DetailsForm : Form
         if (entries.Count != _rows.Count)
             return false;
         for (int i = 0; i < entries.Count; i++)
-            if (entries[i].DisplayName != _rows[i].DisplayName)
+            if (entries[i].ProviderName != _rows[i].ProviderName
+                || entries[i].WindowLabel != _rows[i].WindowLabel)
                 return false;
         return true;
     }
@@ -179,9 +186,11 @@ internal sealed class DetailsForm : Form
             _table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Row row = CreateRow(entries[i]);
             _table.Controls.Add(row.Indicator, 0, i);
-            _table.Controls.Add(row.Name, 1, i);
-            _table.Controls.Add(row.Value, 2, i);
-            _table.Controls.Add(row.Reset, 3, i);
+            _table.Controls.Add(row.Provider, 1, i);
+            _table.Controls.Add(row.Window, 2, i);
+            _table.Controls.Add(row.Value, 3, i);
+            _table.Controls.Add(row.Remaining, 4, i);
+            _table.Controls.Add(row.ResetTime, 5, i);
             _rows.Add(row);
         }
 
@@ -330,30 +339,42 @@ internal sealed class DetailsForm : Form
     {
         var row = new Row
         {
-            DisplayName = e.DisplayName,
+            ProviderName = e.ProviderName,
+            WindowLabel = e.WindowLabel,
             Indicator = new Panel
             {
                 Size = new Size(IndicatorSize, IndicatorSize),
                 Margin = new Padding(0, RowVPad + IndicatorOpticalOffset, 8, RowVPad),
                 Anchor = AnchorStyles.Left,
             },
-            Name = new Label
+            Provider = new Label
+            {
+                AutoSize = true,
+                Margin = new Padding(0, RowVPad, 8, RowVPad),
+                Text = e.ProviderName,
+            },
+            Window = new Label
             {
                 AutoSize = true,
                 Margin = new Padding(0, RowVPad, 16, RowVPad),
-                Text = e.DisplayName,
+                Text = e.WindowLabel,
             },
             Value = new Label
             {
                 AutoSize = true,
                 Margin = new Padding(0, RowVPad, 16, RowVPad),
             },
-            Reset = new Label
+            Remaining = new Label
+            {
+                AutoSize = true,
+                Margin = new Padding(0, RowVPad, 10, RowVPad),
+                // No explicit color: inherit the form's ControlText (default) so the
+                // reset/time text isn't muted and follows the theme on a live switch.
+            },
+            ResetTime = new Label
             {
                 AutoSize = true,
                 Margin = new Padding(0, RowVPad, 0, RowVPad),
-                // No explicit color: inherit the form's ControlText (default) so the
-                // reset/time text isn't muted and follows the theme on a live switch.
             },
         };
         ApplyValues(row, e);
@@ -369,14 +390,14 @@ internal sealed class DetailsForm : Form
             row.Value.Text = e.Error;
             row.Value.ForeColor = ErrorText;
             row.Value.Font = Font;
-            row.Reset.Text = string.Empty;
+            ClearReset(row);
         }
         else if (e.Metric is null)
         {
             row.Value.Text = Strings.Tray_NoData;
             row.Value.ForeColor = MutedText;
             row.Value.Font = Font;
-            row.Reset.Text = string.Empty;
+            ClearReset(row);
         }
         else
         {
@@ -384,8 +405,27 @@ internal sealed class DetailsForm : Form
             row.Value.Text = $"{util:0.#}%";
             row.Value.Font = _boldFont ?? Font;
             row.Value.ForeColor = util >= WarnPercent ? WarnText : SystemColors.ControlText;
-            row.Reset.Text = UsageFormatting.FormatReset(e.Metric.ResetsAt, e.LongDate);
+            ApplyReset(row, e);
         }
+    }
+
+    private static void ClearReset(Row row)
+    {
+        row.Remaining.Text = string.Empty;
+        row.ResetTime.Text = string.Empty;
+    }
+
+    private static void ApplyReset(Row row, Entry e)
+    {
+        if (UsageFormatting.FormatResetParts(e.Metric!.ResetsAt, e.LongDate) is not { } reset)
+        {
+            row.Remaining.Text = "?";
+            row.ResetTime.Text = string.Empty;
+            return;
+        }
+
+        row.Remaining.Text = reset.Remaining;
+        row.ResetTime.Text = reset.Absolute;
     }
 
     protected override void OnPaint(PaintEventArgs e)
