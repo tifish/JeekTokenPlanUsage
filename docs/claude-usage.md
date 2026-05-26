@@ -44,18 +44,35 @@ anthropic-beta: oauth-2025-04-20
 
 无论响应 2xx 还是 429，这组头都会返回，所以即使被限流也能拿到数据。模型列表 [ClaudeUsageProvider.cs:21-25](../ClaudeUsageProvider.cs#L21-L25) 是回退链，第一个能拿到 rate-limit 头就停。
 
-## 凭据来源
+## 凭据来源与刷新
 
-`%USERPROFILE%\.claude\.credentials.json` → `claudeAiOauth.accessToken`
+优先级：
+
+1. Windows: `%USERPROFILE%\.claude\.credentials.json`
+2. WSL fallback: 只枚举 `wsl.exe -l -q --running` 返回的运行中 distro，读取 `~/.claude/.credentials.json`
+
+读取字段：
+
+- `claudeAiOauth.accessToken`
+- `claudeAiOauth.expiresAt`（unix 毫秒，可缺省）
+
+如果 `expiresAt` 已过期，程序不直接改凭据文件，而是让 Claude CLI 自己刷新：
+
+- Windows: `claude -p .`
+- WSL: `wsl.exe -d <distro> -- bash -lic "<claude refresh command>"`
+
+刷新命令隐藏运行，最多等待 30 秒。刷新后重新读取凭据；如果当前来源仍不可用，会继续尝试下一个来源。未运行的 WSL distro 不会被探测或启动。
 
 ## 调用流程
 
-[ClaudeUsageProvider.cs:62-103](../ClaudeUsageProvider.cs#L62-L103)
+[ClaudeUsageProvider.cs](../ClaudeUsageProvider.cs)
 
-1. 不在冷却期 → 调 OAuth 端点；冷却期内 → 跳过，标记为 `Skipped`
-2. OAuth 返回 429 → 标记 `RateLimited`，按阶梯设置下次冷却
-3. OAuth 完全成功（两个窗口的 utilization+reset 都有）→ 直接返回，不调 fallback
-4. 否则调 messages fallback，合并数据：utilization 以 OAuth 为准，缺失的 reset 用 fallback 填
+1. 选择第一个可用且未过期的凭据；过期时先调用 Claude CLI 刷新
+2. 不在冷却期 → 调 OAuth 端点；冷却期内 → 跳过，标记为 `Skipped`
+3. OAuth 返回 429 → 标记 `RateLimited`，按阶梯设置下次冷却
+4. OAuth 完全成功（两个窗口的 utilization+reset 都有）→ 直接返回，不调 fallback
+5. 否则调 messages fallback，合并数据：utilization 以 OAuth 为准，缺失的 reset 用 fallback 填
+6. 任一 HTTP 路径返回 401 / 403 → 调 Claude CLI 刷新当前来源，重新读取凭据并完整重试一次
 
 ## OAuth 冷却阶梯
 
@@ -74,10 +91,13 @@ OAuth 一旦返回正常数据 → streak 清零、冷却清除。
 
 | 状态                   | 行为                                      |
 | ---------------------- | ----------------------------------------- |
-| 401 / 403（任一端点）  | "Token 失效，请在 Claude Code 中重新登录" |
+| 凭据过期               | 后台运行 Claude CLI 刷新并重新读取凭据    |
+| 401 / 403（任一端点）  | 刷新当前凭据后完整重试一次；仍失败才提示重新登录 |
 | OAuth 429              | 进入冷却，本次走 fallback                 |
 | fallback 也失败        | 返回上一次错误描述                        |
 | 凭据文件缺失或解析失败 | 返回明确错误                              |
+
+代码注释保持英文，并尽量只用一两句话说明目的。
 
 ## 轮询节奏
 

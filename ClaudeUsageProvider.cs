@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -23,6 +24,8 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 {
     private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
     private const string MessagesUrl = "https://api.anthropic.com/v1/messages";
+    private const int CliRefreshTimeoutSeconds = 30;
+    private const int WslProbeTimeoutSeconds = 5;
 
     // Tried in order — the first model whose response carries rate-limit headers wins.
     private static readonly string[] ModelFallbackChain =
@@ -44,7 +47,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private static readonly string CredentialsPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
 
-    public static bool HasLocalCredentials() => File.Exists(CredentialsPath);
+    public static bool HasLocalCredentials() => File.Exists(CredentialsPath) || ListWslDistros().Any(ReadWslCredentialsExists);
 
     private readonly HttpClient _http;
 
@@ -61,10 +64,34 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
     public async Task<UsageSnapshot> GetUsageAsync(CancellationToken ct)
     {
-        string? token = ReadAccessToken(out string? credError);
-        if (token is null)
-            return UsageSnapshot.FromError(credError ?? Strings.Claude_ReadCredFailed);
+        CredentialResolution resolved = await Task.Run(
+            () => ResolveCredential(refreshExpired: true, skipRefreshFor: null),
+            ct);
+        if (resolved.Credential is null)
+            return UsageSnapshot.FromError(resolved.Error ?? Strings.Claude_ReadCredFailed);
 
+        ProviderResult result = await FetchUsageWithFallbackAsync(resolved.Credential.AccessToken, ct);
+        if (result.AuthFailed)
+        {
+            CredentialSource source = resolved.Credential.Source;
+            CredentialResolution retryCred = await Task.Run(
+                () =>
+                {
+                    RefreshToken(source);
+                    return ResolveCredential(refreshExpired: true, skipRefreshFor: source);
+                },
+                ct);
+            if (retryCred.Credential is null)
+                return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
+
+            result = await FetchUsageWithFallbackAsync(retryCred.Credential.AccessToken, ct);
+        }
+
+        return ResultToSnapshot(result);
+    }
+
+    private async Task<ProviderResult> FetchUsageWithFallbackAsync(string token, CancellationToken ct)
+    {
         // If OAuth was recently rate-limited, skip it for this poll and go
         // straight to the messages fallback — calling cadence is unchanged.
         bool skipPrimary = DateTimeOffset.UtcNow < _oauthCooldownUntil;
@@ -73,7 +100,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             : await TryUsageEndpointAsync(token, ct);
 
         if (primary.AuthFailed)
-            return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
+            return primary;
 
         if (primary.RateLimited)
         {
@@ -93,23 +120,309 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         if (primary.Snapshot is { } ok
             && ok.FiveHour?.ResetsAt is not null
             && ok.Weekly?.ResetsAt is not null)
-            return ok;
+            return ProviderResult.Ok(ok);
 
         // Otherwise fall back to Messages API: as the data source if primary failed
         // or was skipped, or to fill in missing reset times if primary returned partial data.
         ProviderResult fallback = await TryMessagesFallbackAsync(token, ct);
         if (fallback.AuthFailed)
-            return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
+            return fallback;
 
         if (primary.Snapshot is not null && fallback.Snapshot is not null)
-            return Merge(primary.Snapshot, fallback.Snapshot);
+            return ProviderResult.Ok(Merge(primary.Snapshot, fallback.Snapshot));
 
         if (primary.Snapshot is not null)
-            return primary.Snapshot;
+            return primary;
         if (fallback.Snapshot is not null)
-            return fallback.Snapshot;
+            return fallback;
 
-        return UsageSnapshot.FromError(primary.Error ?? fallback.Error ?? Strings.Error_FetchUsage);
+        return ProviderResult.Failed(primary.Error ?? fallback.Error ?? Strings.Error_FetchUsage);
+    }
+
+    private static UsageSnapshot ResultToSnapshot(ProviderResult result)
+    {
+        if (result.AuthFailed)
+            return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
+        if (result.Snapshot is not null)
+            return result.Snapshot;
+        return UsageSnapshot.FromError(result.Error ?? Strings.Error_FetchUsage);
+    }
+
+    private static CredentialResolution ResolveCredential(bool refreshExpired, CredentialSource? skipRefreshFor)
+    {
+        List<CredentialSource> sources = GetCredentialSources().ToList();
+        if (sources.Count == 0)
+            return new(null, Strings.Claude_CredNotFound);
+
+        string? lastError = null;
+        foreach (CredentialSource source in sources)
+        {
+            ClaudeCredential? credential = ReadCredential(source, out string? error);
+            if (credential is null)
+            {
+                lastError = error ?? lastError;
+                continue;
+            }
+
+            if (!IsExpired(credential))
+                return new(credential, null);
+
+            lastError = Strings.Claude_TokenInvalid;
+            if (!refreshExpired || source.Equals(skipRefreshFor))
+                continue;
+
+            RefreshToken(source);
+            credential = ReadCredential(source, out error);
+            if (credential is not null && !IsExpired(credential))
+                return new(credential, null);
+
+            lastError = error ?? lastError;
+        }
+
+        return new(null, lastError ?? Strings.Claude_ReadCredFailed);
+    }
+
+    private static IEnumerable<CredentialSource> GetCredentialSources()
+    {
+        if (File.Exists(CredentialsPath))
+            yield return new WindowsCredentialSource(CredentialsPath);
+
+        foreach (string distro in ListWslDistros())
+            yield return new WslCredentialSource(distro);
+    }
+
+    private static ClaudeCredential? ReadCredential(CredentialSource source, out string? error)
+    {
+        error = null;
+        string? json = source switch
+        {
+            WindowsCredentialSource windows => ReadWindowsCredentialJson(windows.Path, out error),
+            WslCredentialSource wsl => ReadWslCredentialJson(wsl.Distro, out error),
+            _ => null,
+        };
+
+        return json is null ? null : ParseCredential(json, source, out error);
+    }
+
+    private static string? ReadWindowsCredentialJson(string path, out string? error)
+    {
+        error = null;
+        try
+        {
+            return File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            return null;
+        }
+    }
+
+    private static string? ReadWslCredentialJson(string distro, out string? error)
+    {
+        error = null;
+        ProcessResult result = RunProcess(
+            "wsl.exe",
+            new[] { "-d", distro, "--", "sh", "-lc", "cat ~/.claude/.credentials.json" },
+            TimeSpan.FromSeconds(WslProbeTimeoutSeconds),
+            captureOutput: true);
+
+        if (!result.Succeeded)
+        {
+            error = Strings.Claude_CredNotFound;
+            return null;
+        }
+
+        return result.Output;
+    }
+
+    private static ClaudeCredential? ParseCredential(string json, CredentialSource source, out string? error)
+    {
+        error = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("claudeAiOauth", out JsonElement oauth)
+                || !oauth.TryGetProperty("accessToken", out JsonElement tok)
+                || tok.ValueKind != JsonValueKind.String)
+            {
+                error = Strings.Claude_CredMissingToken;
+                return null;
+            }
+
+            string? token = tok.GetString();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                error = Strings.Claude_CredMissingToken;
+                return null;
+            }
+
+            long? expiresAt = null;
+            if (oauth.TryGetProperty("expiresAt", out JsonElement exp))
+                expiresAt = ReadInt64(exp);
+
+            return new ClaudeCredential(token, expiresAt, source);
+        }
+        catch (Exception ex) when (ex is JsonException or FormatException or OverflowException)
+        {
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            return null;
+        }
+    }
+
+    private static long? ReadInt64(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number))
+            return number;
+        if (value.ValueKind == JsonValueKind.String
+            && long.TryParse(value.GetString(), out long parsed))
+            return parsed;
+        return null;
+    }
+
+    private static bool IsExpired(ClaudeCredential credential)
+    {
+        if (credential.ExpiresAtUnixMs is null)
+            return false;
+
+        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        return nowMs >= credential.ExpiresAtUnixMs.Value;
+    }
+
+    private static void RefreshToken(CredentialSource source)
+    {
+        switch (source)
+        {
+            case WindowsCredentialSource:
+                RefreshWindowsToken();
+                break;
+            case WslCredentialSource wsl:
+                RefreshWslToken(wsl.Distro);
+                break;
+        }
+    }
+
+    private static void RefreshWindowsToken()
+    {
+        string claudePath = ResolveWindowsClaudePath();
+        string[] args = claudePath.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "/c", $"\"{claudePath}\" -p ." }
+            : new[] { "-p", "." };
+        string fileName = claudePath.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
+            ? "cmd.exe"
+            : claudePath;
+
+        RunProcess(
+            fileName,
+            args,
+            TimeSpan.FromSeconds(CliRefreshTimeoutSeconds),
+            captureOutput: false,
+            removeClaudeEnv: true);
+    }
+
+    private static void RefreshWslToken(string distro)
+    {
+        const string command =
+            "if command -v claude >/dev/null 2>&1; then claude -p .; " +
+            "elif [ -x \"$HOME/.local/bin/claude\" ]; then \"$HOME/.local/bin/claude\" -p .; " +
+            "else exit 127; fi";
+
+        RunProcess(
+            "wsl.exe",
+            new[] { "-d", distro, "--", "bash", "-lic", command },
+            TimeSpan.FromSeconds(CliRefreshTimeoutSeconds),
+            captureOutput: false,
+            removeClaudeEnv: true);
+    }
+
+    private static string ResolveWindowsClaudePath()
+    {
+        foreach (string name in new[] { "claude.cmd", "claude.exe", "claude" })
+        {
+            ProcessResult found = RunProcess(
+                "where.exe",
+                new[] { name },
+                TimeSpan.FromSeconds(WslProbeTimeoutSeconds),
+                captureOutput: true);
+            if (found.Succeeded)
+            {
+                string? first = found.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(first))
+                    return first.Trim();
+            }
+        }
+
+        return "claude.cmd";
+    }
+
+    private static IReadOnlyList<string> ListWslDistros()
+    {
+        ProcessBytesResult result = RunProcessBytes(
+            "wsl.exe",
+            new[] { "-l", "-q", "--running" },
+            TimeSpan.FromSeconds(WslProbeTimeoutSeconds));
+        if (!result.Succeeded || result.Output.Length == 0)
+            return Array.Empty<string>();
+
+        string output = DecodeWslText(result.Output);
+        return output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(static line => line.Trim().TrimEnd('\0'))
+            .Where(static line => line.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool ReadWslCredentialsExists(string distro)
+    {
+        return ReadWslCredentialJson(distro, out _) is not null;
+    }
+
+    private static string DecodeWslText(byte[] bytes)
+    {
+        if (bytes.Length == 0)
+            return string.Empty;
+
+        if (TryDecodeUtf16Le(bytes, out string? decoded))
+            return decoded;
+
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    private static bool TryDecodeUtf16Le(byte[] bytes, out string decoded)
+    {
+        decoded = string.Empty;
+        if (bytes.Length < 2)
+            return false;
+
+        ReadOnlySpan<byte> body = bytes;
+        if (bytes[0] == 0xFF && bytes[1] == 0xFE)
+            body = bytes.AsSpan(2);
+        else if (!LooksLikeUtf16Le(bytes))
+            return false;
+
+        if (body.Length % 2 != 0)
+            body = body[..^1];
+
+        decoded = Encoding.Unicode.GetString(body);
+        return true;
+    }
+
+    private static bool LooksLikeUtf16Le(byte[] bytes)
+    {
+        int sampleLen = Math.Min(bytes.Length, 128);
+        int pairs = sampleLen / 2;
+        if (pairs == 0)
+            return false;
+
+        int zeroHighBytes = 0;
+        for (int i = 1; i < pairs * 2; i += 2)
+        {
+            if (bytes[i] == 0)
+                zeroHighBytes++;
+        }
+
+        return zeroHighBytes * 2 >= pairs;
     }
 
     private async Task<ProviderResult> TryUsageEndpointAsync(string token, CancellationToken ct)
@@ -282,34 +595,113 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         return new UsageMetric(util, reset);
     }
 
-    private static string? ReadAccessToken(out string? error)
+    private static ProcessResult RunProcess(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        bool captureOutput,
+        bool removeClaudeEnv = false)
     {
-        error = null;
-        if (!File.Exists(CredentialsPath))
-        {
-            error = Strings.Claude_CredNotFound;
-            return null;
-        }
-
         try
         {
-            string json = File.ReadAllText(CredentialsPath);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("claudeAiOauth", out JsonElement oauth)
-                && oauth.TryGetProperty("accessToken", out JsonElement tok)
-                && tok.ValueKind == JsonValueKind.String)
+            var startInfo = new ProcessStartInfo(fileName)
             {
-                return tok.GetString();
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = captureOutput,
+                RedirectStandardError = true,
+            };
+
+            foreach (string argument in arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            if (removeClaudeEnv)
+            {
+                startInfo.Environment.Remove("CLAUDECODE");
+                startInfo.Environment.Remove("CLAUDE_CODE_ENTRYPOINT");
             }
-            error = Strings.Claude_CredMissingToken;
-            return null;
+
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+                return new(false, string.Empty);
+
+            Task<string>? outputTask = captureOutput ? process.StandardOutput.ReadToEndAsync() : null;
+            Task<string> errorTask = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+            {
+                TryKill(process);
+                return new(false, string.Empty);
+            }
+
+            string output = outputTask is null ? string.Empty : outputTask.GetAwaiter().GetResult();
+            _ = errorTask.GetAwaiter().GetResult();
+            return new(process.ExitCode == 0, output);
         }
-        catch (Exception ex)
+        catch
         {
-            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
-            return null;
+            return new(false, string.Empty);
         }
     }
+
+    private static ProcessBytesResult RunProcessBytes(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo(fileName)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            foreach (string argument in arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+                return new(false, Array.Empty<byte>());
+
+            using var output = new MemoryStream();
+            Task copyTask = process.StandardOutput.BaseStream.CopyToAsync(output);
+            Task<string> errorTask = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+            {
+                TryKill(process);
+                return new(false, Array.Empty<byte>());
+            }
+
+            copyTask.GetAwaiter().GetResult();
+            _ = errorTask.GetAwaiter().GetResult();
+            return new(process.ExitCode == 0, output.ToArray());
+        }
+        catch
+        {
+            return new(false, Array.Empty<byte>());
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best effort cleanup after timeout.
+        }
+    }
+
+    private abstract record CredentialSource;
+    private sealed record WindowsCredentialSource(string Path) : CredentialSource;
+    private sealed record WslCredentialSource(string Distro) : CredentialSource;
+    private sealed record ClaudeCredential(string AccessToken, long? ExpiresAtUnixMs, CredentialSource Source);
+    private readonly record struct CredentialResolution(ClaudeCredential? Credential, string? Error);
+    private readonly record struct ProcessResult(bool Succeeded, string Output);
+    private readonly record struct ProcessBytesResult(bool Succeeded, byte[] Output);
 
     private readonly record struct ProviderResult(
         UsageSnapshot? Snapshot,
