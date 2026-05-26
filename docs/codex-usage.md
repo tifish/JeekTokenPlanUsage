@@ -5,11 +5,10 @@
 ## 数据来源
 
 ```
-GET https://chatgpt.com/backend-api/codex/usage
+GET https://chatgpt.com/backend-api/wham/usage
 Authorization: Bearer <access_token>
-chatgpt-account-id: <account_id>     (可选)
-originator: codex_cli_rs
-User-Agent: codex_cli_rs/0.121.0
+ChatGPT-Account-Id: <account_id>     (可选)
+User-Agent: codex-cli
 ```
 
 响应 JSON：
@@ -29,7 +28,12 @@ User-Agent: codex_cli_rs/0.121.0
 
 ## 凭据来源
 
-`%USERPROFILE%\.codex\auth.json` → `tokens.access_token` 和 `tokens.account_id`
+优先级：
+
+1. `%CODEX_HOME%\auth.json`
+2. `%USERPROFILE%\.codex\auth.json`
+
+读取字段：`tokens.access_token` 和 `tokens.account_id`
 
 ```json
 {
@@ -39,6 +43,16 @@ User-Agent: codex_cli_rs/0.121.0
   }
 }
 ```
+
+## Token 刷新
+
+如果用量端点返回 401 / 403，程序会后台调用本机 Codex CLI 刷新凭据：
+
+```
+codex exec .
+```
+
+刷新命令隐藏运行，stdin 关闭、stdout/stderr 被吞掉，最多等待 30 秒。程序不直接修改 `auth.json`；刷新后重新读取凭据，如果 `access_token` 发生变化，就完整重试一次用量请求。刷新后 token 未变化或仍然 401 / 403 时，才显示重新登录错误。
 
 ## 为什么 shell out 到 curl
 
@@ -79,7 +93,7 @@ HTTPSTATUS:200
 
 | 状态                 | 行为                                     |
 | -------------------- | ---------------------------------------- |
-| 401                  | "Token 失效 (401)，请重新登录 Codex"     |
+| 401 / 403            | 后台运行 Codex CLI 刷新，token 变化后重试一次；仍失败才提示重新登录并暂停真实轮询 |
 | 429                  | "接口限流 (429)"                         |
 | 其他非 2xx           | "HTTP <code>"                            |
 | curl 进程失败        | "curl 失败(<exit>): <stderr 前 80 字符>" |
@@ -93,3 +107,8 @@ HTTPSTATUS:200
 - 端点便宜（不消耗任何配额），随基础间隔走即可
 - 没有 Claude 那种 fallback 烧配额的顾虑
 - 没有阶梯退避，只有上层 `_codexBusy` 互斥防止重叠
+- 认证错误进入暂停态后会弹出一次重新登录通知，普通定时器只检查 `auth.json` 签名；签名变化后恢复真实 API 轮询，菜单"立即刷新"会强制尝试一次
+
+## 诊断日志
+
+Codex 401 恢复链路会写入 `%TEMP%\JeekTokenPlanUsage.log`，只记录 HTTP 状态、curl/CLI 退出码、超时、auth 路径状态和 CLI 路径解析状态，不记录 access token 或 curl stdin 配置内容。

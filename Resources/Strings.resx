@@ -132,6 +132,12 @@
   <data name="Codex_TokenInvalid" xml:space="preserve">
     <value>Token invalid (401). Please re-login Codex.</value>
   </data>
+  <data name="Codex_AuthRequiredTitle" xml:space="preserve">
+    <value>Codex login required</value>
+  </data>
+  <data name="Codex_AuthRequiredBody" xml:space="preserve">
+    <value>Run 'codex' in a terminal and sign in, then refresh this app.</value>
+  </data>
   <data name="Codex_ResponseMissingRateLimit" xml:space="preserve">
     <value>Response is missing rate_limit</value>
   </data>

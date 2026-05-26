@@ -5,20 +5,20 @@ using JeekTokenPlanUsage.Resources;
 
 namespace JeekTokenPlanUsage;
 
-/// Reads Codex usage from the official ChatGPT backend usage endpoint.
+/// Reads Codex usage from the ChatGPT backend usage endpoint.
 /// The endpoint sits behind Cloudflare bot protection that rejects .NET's
 /// HttpClient (TLS fingerprint), but accepts the system curl.exe, so we shell
 /// out to curl. The OAuth token is fed via curl's stdin config to keep it off
 /// the process command line.
 public sealed class CodexUsageProvider : IUsageProvider
 {
-    private const string UsageUrl = "https://chatgpt.com/backend-api/codex/usage";
+    private const string UsageUrl = "https://chatgpt.com/backend-api/wham/usage";
     private const string StatusMarker = "HTTPSTATUS:";
+    private const int CliRefreshTimeoutSeconds = 30;
 
-    private static readonly string AuthPath =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "auth.json");
+    public static bool HasLocalCredentials() => File.Exists(AuthPath());
 
-    public static bool HasLocalCredentials() => File.Exists(AuthPath);
+    public static string CredentialWatchSignature() => AuthWatchSignature(AuthPath());
 
     private static readonly string CurlPath = ResolveCurl();
 
@@ -29,25 +29,61 @@ public sealed class CodexUsageProvider : IUsageProvider
         if (CurlPath is "")
             return UsageSnapshot.FromError(Strings.Codex_CurlNotFound);
 
-        (string? token, string? account, string? credError) = ReadAuth();
-        if (token is null)
+        CodexAuth? auth = ReadAuth(out string? credError);
+        if (auth is null)
             return UsageSnapshot.FromError(credError ?? Strings.Codex_ReadCredFailed);
 
-        string config = BuildCurlConfig(token, account);
+        FetchResult result = await FetchUsageAsync(auth, ct);
+        if (result.AuthFailed)
+        {
+            DiagnosticLog.Warn("Codex usage auth failed; attempting CLI refresh");
+            RefreshCodexToken();
 
+            CodexAuth? refreshed = ReadAuth(out _);
+            if (refreshed is null || string.Equals(refreshed.AccessToken, auth.AccessToken, StringComparison.Ordinal))
+            {
+                DiagnosticLog.Warn("Codex auth retry skipped: refreshed credential unavailable or unchanged");
+                return UsageSnapshot.FromError(Strings.Codex_TokenInvalid, UsageErrorKind.Auth);
+            }
+
+            result = await FetchUsageAsync(refreshed, ct);
+        }
+
+        if (result.AuthFailed)
+            return UsageSnapshot.FromError(Strings.Codex_TokenInvalid, UsageErrorKind.Auth);
+        if (result.Snapshot is not null)
+            return result.Snapshot;
+        return UsageSnapshot.FromError(result.Error ?? Strings.Error_FetchUsage);
+    }
+
+    private static async Task<FetchResult> FetchUsageAsync(CodexAuth auth, CancellationToken ct)
+    {
+        string config = BuildCurlConfig(auth.AccessToken, auth.AccountId);
         (string stdout, string stderr, int exitCode) = await RunCurlAsync(config, ct);
         if (exitCode != 0)
-            return UsageSnapshot.FromError(string.Format(Strings.Codex_CurlFailedFormat, exitCode, Trim(stderr)));
+        {
+            DiagnosticLog.Warn($"Codex curl failed: exit {exitCode}; {Trim(stderr)}");
+            return FetchResult.Failed(string.Format(Strings.Codex_CurlFailedFormat, exitCode, Trim(stderr)));
+        }
 
         (string body, int status) = SplitStatus(stdout);
-        if (status == 401)
-            return UsageSnapshot.FromError(Strings.Codex_TokenInvalid);
+        if (status is 401 or 403)
+        {
+            DiagnosticLog.Warn($"Codex usage auth error HTTP {status}");
+            return FetchResult.Auth();
+        }
         if (status == 429)
-            return UsageSnapshot.FromError(Strings.Error_RateLimit429);
+        {
+            DiagnosticLog.Warn("Codex usage HTTP 429");
+            return FetchResult.Failed(Strings.Error_RateLimit429);
+        }
         if (status is < 200 or >= 300)
-            return UsageSnapshot.FromError($"HTTP {status}");
+        {
+            DiagnosticLog.Warn($"Codex usage HTTP {status}");
+            return FetchResult.Failed($"HTTP {status}");
+        }
 
-        return Parse(body);
+        return FetchResult.Ok(Parse(body));
     }
 
     private static string BuildCurlConfig(string token, string? account)
@@ -56,9 +92,8 @@ public sealed class CodexUsageProvider : IUsageProvider
         sb.AppendLine($"url = \"{UsageUrl}\"");
         sb.AppendLine($"header = \"Authorization: Bearer {token}\"");
         if (!string.IsNullOrEmpty(account))
-            sb.AppendLine($"header = \"chatgpt-account-id: {account}\"");
-        sb.AppendLine("header = \"originator: codex_cli_rs\"");
-        sb.AppendLine("user-agent = \"codex_cli_rs/0.121.0\"");
+            sb.AppendLine($"header = \"ChatGPT-Account-Id: {account}\"");
+        sb.AppendLine("user-agent = \"codex-cli\"");
         sb.AppendLine("max-time = 20");
         sb.AppendLine("silent");
         sb.AppendLine("show-error");
@@ -154,31 +189,186 @@ public sealed class CodexUsageProvider : IUsageProvider
         return new UsageMetric(used, reset);
     }
 
-    private static (string? token, string? account, string? error) ReadAuth()
+    private static CodexAuth? ReadAuth(out string? error)
     {
-        if (!File.Exists(AuthPath))
-            return (null, null, Strings.Codex_AuthNotFound);
+        error = null;
+        string authPath = AuthPath();
+        if (!File.Exists(authPath))
+        {
+            error = Strings.Codex_AuthNotFound;
+            return null;
+        }
 
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(AuthPath));
+            using var doc = JsonDocument.Parse(File.ReadAllText(authPath));
             if (!doc.RootElement.TryGetProperty("tokens", out JsonElement tokens) ||
                 !tokens.TryGetProperty("access_token", out JsonElement at) ||
                 at.ValueKind != JsonValueKind.String)
             {
-                return (null, null, Strings.Codex_AuthMissingToken);
+                error = Strings.Codex_AuthMissingToken;
+                return null;
+            }
+
+            string? token = at.GetString();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                error = Strings.Codex_AuthMissingToken;
+                return null;
             }
 
             string? account = tokens.TryGetProperty("account_id", out JsonElement acc) && acc.ValueKind == JsonValueKind.String
                 ? acc.GetString()
                 : null;
 
-            return (at.GetString(), account, null);
+            return new CodexAuth(token, account);
         }
         catch (Exception ex)
         {
-            return (null, null, string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message));
+            DiagnosticLog.Error($"Codex auth read failed: {ex.Message}");
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            return null;
         }
+    }
+
+    private static void RefreshCodexToken()
+    {
+        string codexPath = ResolveCodexPath();
+        string lower = codexPath.ToLowerInvariant();
+        string fileName;
+        string[] args;
+
+        if (lower.EndsWith(".cmd"))
+        {
+            fileName = "cmd.exe";
+            args = new[] { "/c", $"\"{codexPath}\" exec ." };
+        }
+        else if (lower.EndsWith(".ps1"))
+        {
+            fileName = "powershell.exe";
+            args = new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", codexPath, "exec", "." };
+        }
+        else
+        {
+            fileName = codexPath;
+            args = new[] { "exec", "." };
+        }
+
+        DiagnosticLog.Info($"Attempting Codex token refresh via {Path.GetFileName(codexPath)}");
+        ProcessResult result = RunProcess(
+            fileName,
+            args,
+            TimeSpan.FromSeconds(CliRefreshTimeoutSeconds),
+            purpose: "Codex token refresh",
+            captureOutput: false,
+            logSuccess: true);
+        if (!result.Succeeded)
+            DiagnosticLog.Warn($"Codex token refresh failed: {ProcessSummary(result)}");
+    }
+
+    private static string ResolveCodexPath()
+    {
+        foreach (string name in new[] { "codex.cmd", "codex.ps1", "codex.exe", "codex" })
+        {
+            ProcessResult found = RunProcess(
+                "where.exe",
+                new[] { name },
+                TimeSpan.FromSeconds(5),
+                purpose: $"resolve {name}",
+                captureOutput: true,
+                logFailure: false);
+            if (found.Succeeded)
+            {
+                string? first = found.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(first))
+                {
+                    DiagnosticLog.Info($"Resolved Codex CLI path: {Path.GetFileName(first.Trim())}");
+                    return first.Trim();
+                }
+            }
+        }
+
+        DiagnosticLog.Warn("Codex CLI path not found with where.exe; falling back to codex.cmd");
+        return "codex.cmd";
+    }
+
+    private static ProcessResult RunProcess(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        string purpose,
+        bool captureOutput,
+        bool logFailure = true,
+        bool logSuccess = false)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo(fileName)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            foreach (string argument in arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+            {
+                var result = new ProcessResult(false, Error: "Process.Start returned null");
+                if (logFailure)
+                    DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+                return result;
+            }
+
+            process.StandardInput.Close();
+            Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> errorTask = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                var result = new ProcessResult(false, TimedOut: true);
+                if (logFailure)
+                    DiagnosticLog.Warn($"{purpose} timed out after {timeout.TotalSeconds:0.#} seconds");
+                return result;
+            }
+
+            string rawOutput = outputTask.GetAwaiter().GetResult();
+            _ = errorTask.GetAwaiter().GetResult();
+            var completed = new ProcessResult(process.ExitCode == 0, captureOutput ? rawOutput : string.Empty, process.ExitCode);
+            if (completed.Succeeded)
+            {
+                if (logSuccess)
+                    DiagnosticLog.Info($"{purpose} succeeded");
+            }
+            else if (logFailure)
+            {
+                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(completed)}");
+            }
+
+            return completed;
+        }
+        catch (Exception ex)
+        {
+            var result = new ProcessResult(false, Error: ex.Message);
+            if (logFailure)
+                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+            return result;
+        }
+    }
+
+    private static string ProcessSummary(ProcessResult result)
+    {
+        if (result.TimedOut)
+            return "timeout";
+        if (result.ExitCode is int exitCode)
+            return $"exit {exitCode}";
+        return result.Error ?? "unknown";
     }
 
     private static string ResolveCurl()
@@ -188,4 +378,44 @@ public sealed class CodexUsageProvider : IUsageProvider
     }
 
     private static string Trim(string s) => s.Length <= 80 ? s.Trim() : s[..80].Trim();
+
+    private static string AuthPath()
+    {
+        string? codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        if (!string.IsNullOrWhiteSpace(codexHome))
+            return Path.Combine(codexHome, "auth.json");
+
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "auth.json");
+    }
+
+    private static string AuthWatchSignature(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+                return $"codex:{path}|missing";
+
+            return $"codex:{path}|present|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch
+        {
+            return $"codex:{path}|unavailable";
+        }
+    }
+
+    private sealed record CodexAuth(string AccessToken, string? AccountId);
+    private readonly record struct FetchResult(UsageSnapshot? Snapshot, bool AuthFailed, string? Error)
+    {
+        public static FetchResult Ok(UsageSnapshot snap) => new(snap, false, null);
+        public static FetchResult Auth() => new(null, true, null);
+        public static FetchResult Failed(string error) => new(null, false, error);
+    }
+
+    private readonly record struct ProcessResult(
+        bool Succeeded,
+        string Output = "",
+        int? ExitCode = null,
+        bool TimedOut = false,
+        string? Error = null);
 }

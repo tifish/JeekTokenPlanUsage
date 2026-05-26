@@ -60,6 +60,8 @@ internal static class Strings
     public static string Codex_ReadCredFailed => Get(nameof(Codex_ReadCredFailed));
     public static string Codex_CurlFailedFormat => Get(nameof(Codex_CurlFailedFormat));
     public static string Codex_TokenInvalid => Get(nameof(Codex_TokenInvalid));
+    public static string Codex_AuthRequiredTitle => Get(nameof(Codex_AuthRequiredTitle));
+    public static string Codex_AuthRequiredBody => Get(nameof(Codex_AuthRequiredBody));
     public static string Codex_ResponseMissingRateLimit => Get(nameof(Codex_ResponseMissingRateLimit));
     public static string Codex_AuthNotFound => Get(nameof(Codex_AuthNotFound));
     public static string Codex_AuthMissingToken => Get(nameof(Codex_AuthMissingToken));

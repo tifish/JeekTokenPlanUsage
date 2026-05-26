@@ -59,11 +59,14 @@ public sealed class TrayApplicationContext : ApplicationContext
     private int _baseIntervalMs;
     private int _claudeRetryCount;
     private string _claudeAuthCredentialSignature = string.Empty;
+    private string _codexAuthCredentialSignature = string.Empty;
 
     private bool _claudeBusy;
     private bool _claudeAuthPaused;
     private bool _claudeAuthNotified;
     private bool _codexBusy;
+    private bool _codexAuthPaused;
+    private bool _codexAuthNotified;
     private bool _cursorBusy;
     private bool _disposed;
 
@@ -213,11 +216,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.Save();
             _showCodexItem.Checked = next;
             _codexIcons.ApplyMode(EffectiveMode(next));
+            if (!next)
+                ResetCodexAuthState();
             ApplyTimers();
             UpdateAnchor();
             UpdateWidget();
             if (next)
-                await RefreshCodexAsync();
+                await RefreshCodexAsync(force: true);
         };
 
         _showCursorItem.Checked = _settings.ShowCursor;
@@ -425,7 +430,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip();
 
         _refreshItem = new ToolStripMenuItem(Strings.Menu_RefreshNow);
-        _refreshItem.Click += async (_, _) => await RefreshAllAsync(forceClaude: true);
+        _refreshItem.Click += async (_, _) => await RefreshAllAsync(forceClaude: true, forceCodex: true);
 
         _startupItem = new ToolStripMenuItem(Strings.Menu_RunAtStartup);
         _showClaudeItem = new ToolStripMenuItem(Strings.Menu_ShowClaude);
@@ -478,13 +483,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         return menu;
     }
 
-    private async Task RefreshAllAsync(bool forceClaude = false)
+    private async Task RefreshAllAsync(bool forceClaude = false, bool forceCodex = false)
     {
         var tasks = new List<Task>();
         if (_settings.ShowClaude)
             tasks.Add(RefreshClaudeAsync(forceClaude));
         if (_settings.ShowCodex)
-            tasks.Add(RefreshCodexAsync());
+            tasks.Add(RefreshCodexAsync(forceCodex));
         if (_settings.ShowCursor)
             tasks.Add(RefreshCursorAsync());
         await Task.WhenAll(tasks);
@@ -585,24 +590,67 @@ public sealed class TrayApplicationContext : ApplicationContext
         _claudeAuthCredentialSignature = string.Empty;
     }
 
-    private async Task RefreshCodexAsync()
+    private async Task RefreshCodexAsync(bool force = false)
     {
         if (_codexBusy || _disposed)
             return;
         _codexBusy = true;
         try
         {
+            if (_codexAuthPaused && !force)
+            {
+                string signature = await Task.Run(CodexUsageProvider.CredentialWatchSignature);
+                if (signature == _codexAuthCredentialSignature)
+                    return;
+
+                DiagnosticLog.Info("Codex credential signature changed; resuming auth polling");
+                _codexAuthPaused = false;
+            }
+
             UsageSnapshot snap = await _codex.GetUsageAsync(CancellationToken.None);
             if (_disposed)
                 return;
             _codexSnap = snap;
             _codexIcons.Update(snap);
             RefreshDetailsIfVisible();
+
+            if (snap.ErrorKind == UsageErrorKind.Auth)
+            {
+                _codexAuthPaused = true;
+                _codexAuthCredentialSignature = await Task.Run(CodexUsageProvider.CredentialWatchSignature);
+                DiagnosticLog.Warn("Codex auth polling paused until credentials change");
+                NotifyCodexAuthErrorOnce();
+            }
+            else
+            {
+                ResetCodexAuthState();
+            }
         }
         finally
         {
             _codexBusy = false;
         }
+    }
+
+    private void NotifyCodexAuthErrorOnce()
+    {
+        if (_codexAuthNotified)
+            return;
+
+        _codexAuthNotified = true;
+        bool shown = _codexIcons.ShowNotification(Strings.Codex_AuthRequiredTitle, Strings.Codex_AuthRequiredBody);
+        if (!shown)
+            shown = _anchor.ShowNotification(Strings.Codex_AuthRequiredTitle, Strings.Codex_AuthRequiredBody);
+
+        if (!shown)
+            DiagnosticLog.Warn("Codex auth notification was not shown because no tray icon was available");
+    }
+
+    private void ResetCodexAuthState()
+    {
+        _codexAuthPaused = false;
+        _codexAuthNotified = false;
+        _codexAuthCredentialSignature = string.Empty;
     }
 
     private async Task RefreshCursorAsync()
