@@ -49,6 +49,16 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
     public static bool HasLocalCredentials() => File.Exists(CredentialsPath) || ListWslDistros().Any(ReadWslCredentialsExists);
 
+    public static string CredentialWatchSignature()
+    {
+        var parts = new List<string> { WindowsCredentialWatchSignature(CredentialsPath) };
+        foreach (string distro in ListWslDistros())
+            parts.Add(WslCredentialWatchSignature(distro));
+
+        parts.Sort(StringComparer.Ordinal);
+        return string.Join("\n", parts);
+    }
+
     private readonly HttpClient _http;
 
     private DateTimeOffset _oauthCooldownUntil = DateTimeOffset.MinValue;
@@ -65,10 +75,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     public async Task<UsageSnapshot> GetUsageAsync(CancellationToken ct)
     {
         CredentialResolution resolved = await Task.Run(
-            () => ResolveCredential(refreshExpired: true, skipRefreshFor: null),
+            () => ResolveCredential(refreshExpired: true, skipRefreshFor: null, rejected: null),
             ct);
         if (resolved.Credential is null)
-            return UsageSnapshot.FromError(resolved.Error ?? Strings.Claude_ReadCredFailed);
+            return UsageSnapshot.FromError(resolved.Error ?? Strings.Claude_ReadCredFailed, UsageErrorKind.Auth);
 
         ProviderResult result = await FetchUsageWithFallbackAsync(resolved.Credential.AccessToken, ct);
         if (result.AuthFailed)
@@ -78,11 +88,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 () =>
                 {
                     RefreshToken(source);
-                    return ResolveCredential(refreshExpired: true, skipRefreshFor: source);
+                    return ResolveCredential(refreshExpired: true, skipRefreshFor: source, rejected: resolved.Credential);
                 },
                 ct);
             if (retryCred.Credential is null)
-                return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
+                return UsageSnapshot.FromError(Strings.Claude_TokenInvalid, UsageErrorKind.Auth);
 
             result = await FetchUsageWithFallbackAsync(retryCred.Credential.AccessToken, ct);
         }
@@ -142,13 +152,16 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private static UsageSnapshot ResultToSnapshot(ProviderResult result)
     {
         if (result.AuthFailed)
-            return UsageSnapshot.FromError(Strings.Claude_TokenInvalid);
+            return UsageSnapshot.FromError(Strings.Claude_TokenInvalid, UsageErrorKind.Auth);
         if (result.Snapshot is not null)
             return result.Snapshot;
         return UsageSnapshot.FromError(result.Error ?? Strings.Error_FetchUsage);
     }
 
-    private static CredentialResolution ResolveCredential(bool refreshExpired, CredentialSource? skipRefreshFor)
+    private static CredentialResolution ResolveCredential(
+        bool refreshExpired,
+        CredentialSource? skipRefreshFor,
+        ClaudeCredential? rejected)
     {
         List<CredentialSource> sources = GetCredentialSources().ToList();
         if (sources.Count == 0)
@@ -164,6 +177,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 continue;
             }
 
+            if (IsRejected(credential, rejected))
+            {
+                lastError = Strings.Claude_TokenInvalid;
+                continue;
+            }
+
             if (!IsExpired(credential))
                 return new(credential, null);
 
@@ -173,7 +192,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
             RefreshToken(source);
             credential = ReadCredential(source, out error);
-            if (credential is not null && !IsExpired(credential))
+            if (credential is not null && !IsExpired(credential) && !IsRejected(credential, rejected))
                 return new(credential, null);
 
             lastError = error ?? lastError;
@@ -181,6 +200,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
         return new(null, lastError ?? Strings.Claude_ReadCredFailed);
     }
+
+    private static bool IsRejected(ClaudeCredential credential, ClaudeCredential? rejected) =>
+        rejected is not null
+        && credential.Source.Equals(rejected.Source)
+        && string.Equals(credential.AccessToken, rejected.AccessToken, StringComparison.Ordinal);
 
     private static IEnumerable<CredentialSource> GetCredentialSources()
     {
@@ -376,6 +400,42 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private static bool ReadWslCredentialsExists(string distro)
     {
         return ReadWslCredentialJson(distro, out _) is not null;
+    }
+
+    private static string WindowsCredentialWatchSignature(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+                return $"win:{path}|missing";
+
+            return $"win:{path}|present|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch
+        {
+            return $"win:{path}|unavailable";
+        }
+    }
+
+    private static string WslCredentialWatchSignature(string distro)
+    {
+        ProcessResult result = RunProcess(
+            "wsl.exe",
+            new[]
+            {
+                "-d",
+                distro,
+                "--",
+                "sh",
+                "-lc",
+                "if [ -f ~/.claude/.credentials.json ]; then stat -c 'present|%s|%Y' ~/.claude/.credentials.json; else echo missing; fi",
+            },
+            TimeSpan.FromSeconds(WslProbeTimeoutSeconds),
+            captureOutput: true);
+
+        string state = result.Succeeded ? result.Output.Trim() : "unavailable";
+        return $"wsl:{distro}|{state}";
     }
 
     private static string DecodeWslText(byte[] bytes)

@@ -16,7 +16,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     // After a successful Claude poll whose returned reset time is already in
     // the past, poll again at this cadence until the API rolls over to a new
     // window. Claude-only — Codex / Cursor don't need this.
-    private static readonly TimeSpan ClaudeFastPollAfterReset = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan ClaudeFastPollAfterReset = TimeSpan.FromSeconds(10);
 
     // Cap on Claude's exponential backoff during sustained errors.
     private static readonly TimeSpan ClaudeMaxBackoff = TimeSpan.FromHours(1);
@@ -58,8 +58,10 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private int _baseIntervalMs;
     private int _claudeRetryCount;
+    private string _claudeAuthCredentialSignature = string.Empty;
 
     private bool _claudeBusy;
+    private bool _claudeAuthPaused;
     private bool _codexBusy;
     private bool _cursorBusy;
     private bool _disposed;
@@ -197,7 +199,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             UpdateAnchor();
             UpdateWidget();
             if (next)
-                await RefreshClaudeAsync();
+                await RefreshClaudeAsync(force: true);
         };
 
         _showCodexItem.Checked = _settings.ShowCodex;
@@ -420,7 +422,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip();
 
         _refreshItem = new ToolStripMenuItem(Strings.Menu_RefreshNow);
-        _refreshItem.Click += async (_, _) => await RefreshAllAsync();
+        _refreshItem.Click += async (_, _) => await RefreshAllAsync(forceClaude: true);
 
         _startupItem = new ToolStripMenuItem(Strings.Menu_RunAtStartup);
         _showClaudeItem = new ToolStripMenuItem(Strings.Menu_ShowClaude);
@@ -473,11 +475,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         return menu;
     }
 
-    private async Task RefreshAllAsync()
+    private async Task RefreshAllAsync(bool forceClaude = false)
     {
         var tasks = new List<Task>();
         if (_settings.ShowClaude)
-            tasks.Add(RefreshClaudeAsync());
+            tasks.Add(RefreshClaudeAsync(forceClaude));
         if (_settings.ShowCodex)
             tasks.Add(RefreshCodexAsync());
         if (_settings.ShowCursor)
@@ -485,22 +487,47 @@ public sealed class TrayApplicationContext : ApplicationContext
         await Task.WhenAll(tasks);
     }
 
-    private async Task RefreshClaudeAsync()
+    private async Task RefreshClaudeAsync(bool force = false)
     {
         if (_claudeBusy || _disposed)
             return;
         _claudeBusy = true;
         try
         {
+            if (_claudeAuthPaused && !force)
+            {
+                string signature = await Task.Run(ClaudeUsageProvider.CredentialWatchSignature);
+                if (signature == _claudeAuthCredentialSignature)
+                {
+                    _claudeTimer.Interval = _baseIntervalMs;
+                    return;
+                }
+
+                _claudeAuthPaused = false;
+            }
+
             UsageSnapshot snap = await _claude.GetUsageAsync(CancellationToken.None);
             if (_disposed)
                 return;
             _claudeSnap = snap;
             _claudeIcons.Update(snap);
             RefreshDetailsIfVisible();
-            // Setting Interval restarts the countdown — exactly what we want for
-            // adapting cadence (backoff on error, fast-poll right after reset).
-            _claudeTimer.Interval = NextClaudeIntervalMs(snap);
+
+            if (snap.ErrorKind == UsageErrorKind.Auth)
+            {
+                _claudeAuthPaused = true;
+                _claudeRetryCount = 0;
+                _claudeAuthCredentialSignature = await Task.Run(ClaudeUsageProvider.CredentialWatchSignature);
+                _claudeTimer.Interval = _baseIntervalMs;
+            }
+            else
+            {
+                _claudeAuthPaused = false;
+                _claudeAuthCredentialSignature = string.Empty;
+                // Setting Interval restarts the countdown — exactly what we want for
+                // adapting cadence (backoff on error, fast-poll right after reset).
+                _claudeTimer.Interval = NextClaudeIntervalMs(snap);
+            }
         }
         finally
         {

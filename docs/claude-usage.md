@@ -73,6 +73,7 @@ anthropic-beta: oauth-2025-04-20
 4. OAuth 完全成功（两个窗口的 utilization+reset 都有）→ 直接返回，不调 fallback
 5. 否则调 messages fallback，合并数据：utilization 以 OAuth 为准，缺失的 reset 用 fallback 填
 6. 任一 HTTP 路径返回 401 / 403 → 调 Claude CLI 刷新当前来源，重新读取凭据并完整重试一次
+7. 如果刷新后 token 没变，跳过这个来源，避免用同一个失效 token 立刻重试
 
 ## OAuth 冷却阶梯
 
@@ -99,13 +100,15 @@ OAuth 一旦返回正常数据 → streak 清零、冷却清除。
 
 代码注释保持英文，并尽量只用一两句话说明目的。
 
+认证错误进入暂停态后，普通定时器只检查凭据签名（Windows 文件存在/大小/mtime，运行中 WSL 的 `stat` 结果）。签名变化后才恢复真实 API 轮询；菜单"立即刷新"会强制尝试一次。
+
 ## 轮询节奏
 
 [TrayApplicationContext.cs](../TrayApplicationContext.cs) 控制：
 
 - 基础间隔由托盘菜单"刷新间隔"统一决定，三家共用：1 / 5 / 10 / 30 / 60 分钟（默认 5）
 - 错误退避（**仅 Claude**）：snapshot 整体失败时 2^(retry-1) 指数退避，封顶 1 小时
-- 重置后快速回探（**仅 Claude**）：如果返回的 reset 时间已过去，下一次 60 秒后再查（API 还没翻新窗口）
+- 重置后快速回探（**仅 Claude**）：如果返回的 reset 时间已过去，每 10 秒再查一次，直到 API 翻到新窗口
 
 ## 成本估算
 
