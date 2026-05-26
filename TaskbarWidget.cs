@@ -32,7 +32,7 @@ internal sealed class TaskbarWidget : IDisposable
     private const int BarW = 40;
     private const int BarH = 7;
     private const int BarPctGap = 3;
-    private const int PctRemainGap = 6;
+    private const int PctRemainGap = 10;
     private const int ColGap = 11;
     // Gap between a separator and the title of the column after it (kept larger
     // than the gap to the preceding column so the next title isn't cramped).

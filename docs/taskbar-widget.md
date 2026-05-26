@@ -2,7 +2,7 @@
 
 实现：[TaskbarWidget.cs](../TaskbarWidget.cs)，使用方：[TrayApplicationContext.cs](../TrayApplicationContext.cs)。可在右键菜单「在任务栏显示组件 / Show widget on taskbar」开关，默认关闭。
 
-参考 [CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor)：在任务栏上（时钟/托盘左侧）显示每个 provider 两个时间窗口的进度条 + 百分比 + 重置剩余时间。每格形如 `CL 5h ▓░ 24% 3h`（剩余时间只显示最大单位以省空间）。剩余时间用 1 秒定时器在分钟变化时重绘以保持实时（见 [`OnTick`](../TaskbarWidget.cs)）。
+参考 [CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor)：在任务栏上（时钟/托盘左侧）显示每个 provider 两个时间窗口的进度条 + 百分比 + 重置剩余时间。每格形如 `CL 5h ▓░ 24%   3h`（剩余时间只显示最大单位以省空间）。剩余时间用 1 秒定时器在分钟变化时重绘以保持实时（见 [`OnTick`](../TaskbarWidget.cs)）。
 
 组件内所有文字（窗口标签、百分比、剩余时间、错误占位）都使用对应 provider 的主色，便于快速区分 Claude / Codex / Cursor。
 
