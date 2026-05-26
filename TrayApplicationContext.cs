@@ -506,6 +506,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                     return;
                 }
 
+                DiagnosticLog.Info("Claude credential signature changed; resuming auth polling");
                 _claudeAuthPaused = false;
             }
 
@@ -522,6 +523,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _claudeRetryCount = 0;
                 _claudeAuthCredentialSignature = await Task.Run(ClaudeUsageProvider.CredentialWatchSignature);
                 _claudeTimer.Interval = _baseIntervalMs;
+                DiagnosticLog.Warn("Claude auth polling paused until credentials change");
                 NotifyClaudeAuthErrorOnce();
             }
             else
@@ -570,7 +572,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         _claudeAuthNotified = true;
         bool shown = _claudeIcons.ShowNotification(Strings.Claude_AuthRequiredTitle, Strings.Claude_AuthRequiredBody);
         if (!shown)
-            _anchor.ShowNotification(Strings.Claude_AuthRequiredTitle, Strings.Claude_AuthRequiredBody);
+            shown = _anchor.ShowNotification(Strings.Claude_AuthRequiredTitle, Strings.Claude_AuthRequiredBody);
+
+        if (!shown)
+            DiagnosticLog.Warn("Claude auth notification was not shown because no tray icon was available");
     }
 
     private void ResetClaudeAuthState()

@@ -102,6 +102,10 @@ OAuth 一旦返回正常数据 → streak 清零、冷却清除。
 
 认证错误进入暂停态后会弹出一次重新登录通知。普通定时器只检查凭据签名（Windows 文件存在/大小/mtime，运行中 WSL 的 `stat` 结果）。签名变化后才恢复真实 API 轮询；菜单"立即刷新"会强制尝试一次。
 
+## 诊断日志
+
+Claude 刷新链路会把关键状态写入 `%TEMP%\JeekTokenPlanUsage.log`，文件超过 512KB 时轮转为 `.old`。日志只记录端点状态码、进程退出码/超时、凭据来源类型、WSL distro 名和解析错误，不记录 access token、请求 payload 或凭据文件内容。
+
 ## 轮询节奏
 
 [TrayApplicationContext.cs](../TrayApplicationContext.cs) 控制：
