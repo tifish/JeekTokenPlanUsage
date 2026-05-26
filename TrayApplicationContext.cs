@@ -15,8 +15,21 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     // After a successful Claude poll whose returned reset time is already in
     // the past, poll again at this cadence until the API rolls over to a new
-    // window. Claude-only — Codex / Cursor don't need this.
+    // window. Claude-only; Codex / Cursor don't need this.
     private static readonly TimeSpan ClaudeFastPollAfterReset = TimeSpan.FromSeconds(10);
+
+    // While Claude usage is actively increasing, keep a short burst of faster
+    // polls so the tray catches up without permanently raising fallback cost.
+    private static readonly TimeSpan ClaudeActivePollInterval = TimeSpan.FromMinutes(2);
+    private const int ClaudeActivePollFollowUps = 2;
+
+    // Timer-driven Claude polls pause while the user is away; manual refresh
+    // still bypasses this so the menu stays responsive.
+    private static readonly TimeSpan ClaudeIdlePause = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ClaudeIdleCheckInterval = TimeSpan.FromSeconds(30);
+
+    // Poll just after an upcoming reset instead of waiting a full base interval.
+    private static readonly TimeSpan ClaudeResetPollBuffer = TimeSpan.FromSeconds(5);
 
     // Cap on Claude's exponential backoff during sustained errors.
     private static readonly TimeSpan ClaudeMaxBackoff = TimeSpan.FromHours(1);
@@ -58,12 +71,15 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private int _baseIntervalMs;
     private int _claudeRetryCount;
+    private int _claudeFastPollsRemaining;
     private string _claudeAuthCredentialSignature = string.Empty;
     private string _codexAuthCredentialSignature = string.Empty;
+    private UsageSnapshot? _claudeLastSuccessfulSnap;
 
     private bool _claudeBusy;
     private bool _claudeAuthPaused;
     private bool _claudeAuthNotified;
+    private bool _claudeIdlePaused;
     private bool _codexBusy;
     private bool _codexAuthPaused;
     private bool _codexAuthNotified;
@@ -346,6 +362,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _settings.Save();
                 _baseIntervalMs = minutes * 60_000;
                 _claudeRetryCount = 0;
+                _claudeFastPollsRemaining = 0;
                 _claudeTimer.Interval = _baseIntervalMs;
                 _codexTimer.Interval = _baseIntervalMs;
                 _cursorTimer.Interval = _baseIntervalMs;
@@ -502,6 +519,24 @@ public sealed class TrayApplicationContext : ApplicationContext
         _claudeBusy = true;
         try
         {
+            if (!force && UserActivity.IsAway(ClaudeIdlePause))
+            {
+                if (!_claudeIdlePaused)
+                {
+                    _claudeIdlePaused = true;
+                    DiagnosticLog.Info("Claude polling paused while user is idle or workstation is locked");
+                }
+
+                _claudeTimer.Interval = ToTimerInterval(ClaudeIdleCheckInterval);
+                return;
+            }
+
+            if (_claudeIdlePaused)
+            {
+                _claudeIdlePaused = false;
+                DiagnosticLog.Info("Claude polling resumed after user activity");
+            }
+
             if (_claudeAuthPaused && !force)
             {
                 string signature = await Task.Run(ClaudeUsageProvider.CredentialWatchSignature);
@@ -526,6 +561,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             {
                 _claudeAuthPaused = true;
                 _claudeRetryCount = 0;
+                _claudeFastPollsRemaining = 0;
                 _claudeAuthCredentialSignature = await Task.Run(ClaudeUsageProvider.CredentialWatchSignature);
                 _claudeTimer.Interval = _baseIntervalMs;
                 DiagnosticLog.Warn("Claude auth polling paused until credentials change");
@@ -550,6 +586,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (snap.Error is not null)
         {
             _claudeRetryCount++;
+            _claudeFastPollsRemaining = 0;
             // 2^(retry-1), capped to avoid shifting past int width.
             int shift = Math.Min(_claudeRetryCount - 1, 16);
             long ms = (long)_baseIntervalMs * (1L << shift);
@@ -559,14 +596,64 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _claudeRetryCount = 0;
 
-        // Either window's reset time being in the past means the API hasn't
-        // rolled over yet — poll faster so the new window appears promptly.
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        bool pastReset =
-            (snap.FiveHour?.ResetsAt is { } a && a <= now)
-            || (snap.Weekly?.ResetsAt is { } b && b <= now);
+        TimeSpan? resetDelay = EarliestClaudeResetDelay(snap, now);
+        if (resetDelay is { } due && due <= TimeSpan.Zero)
+            return ToTimerInterval(ClaudeFastPollAfterReset);
 
-        return pastReset ? (int)ClaudeFastPollAfterReset.TotalMilliseconds : _baseIntervalMs;
+        bool usageIncreased = ClaudeUsageIncreased(_claudeLastSuccessfulSnap, snap);
+        _claudeLastSuccessfulSnap = snap;
+
+        if (usageIncreased)
+            _claudeFastPollsRemaining = ClaudeActivePollFollowUps + 1;
+        else if (_claudeFastPollsRemaining > 0)
+            _claudeFastPollsRemaining--;
+
+        int interval = _claudeFastPollsRemaining > 0
+            ? Math.Min(_baseIntervalMs, ToTimerInterval(ClaudeActivePollInterval))
+            : _baseIntervalMs;
+
+        if (resetDelay is { } upcoming
+            && upcoming + ClaudeResetPollBuffer < TimeSpan.FromMilliseconds(interval))
+            return ToTimerInterval(upcoming + ClaudeResetPollBuffer);
+
+        return interval;
+    }
+
+    private static TimeSpan? EarliestClaudeResetDelay(UsageSnapshot snap, DateTimeOffset now)
+    {
+        TimeSpan? earliest = null;
+        Add(snap.FiveHour?.ResetsAt);
+        Add(snap.Weekly?.ResetsAt);
+        return earliest;
+
+        void Add(DateTimeOffset? reset)
+        {
+            if (reset is null)
+                return;
+
+            TimeSpan delay = reset.Value - now;
+            if (earliest is null || delay < earliest.Value)
+                earliest = delay;
+        }
+    }
+
+    private static bool ClaudeUsageIncreased(UsageSnapshot? previous, UsageSnapshot current) =>
+        previous is not null
+        && (MetricIncreased(previous.FiveHour, current.FiveHour)
+            || MetricIncreased(previous.Weekly, current.Weekly));
+
+    private static bool MetricIncreased(UsageMetric? previous, UsageMetric? current) =>
+        previous is not null
+        && current is not null
+        && current.Utilization > previous.Utilization + 0.05;
+
+    private static int ToTimerInterval(TimeSpan interval)
+    {
+        long ms = (long)Math.Ceiling(interval.TotalMilliseconds);
+        if (ms < 1)
+            return 1;
+        return ms > int.MaxValue ? int.MaxValue : (int)ms;
     }
 
     private void NotifyClaudeAuthErrorOnce()

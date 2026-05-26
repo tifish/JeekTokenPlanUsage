@@ -121,8 +121,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
         if (primary.RateLimited)
         {
-            // Extend cooldown using the next rung of the ladder.
-            TimeSpan cd = OauthCooldownLadder[Math.Min(_oauthRateLimitStreak, OauthCooldownLadder.Length - 1)];
+            // Prefer the server hint when present, otherwise use the local ladder.
+            TimeSpan cd = primary.RetryAfter is { } retryAfter && retryAfter > TimeSpan.Zero
+                ? retryAfter
+                : OauthCooldownLadder[Math.Min(_oauthRateLimitStreak, OauthCooldownLadder.Length - 1)];
+            cd = cd <= OauthCooldownLadder[^1] ? cd : OauthCooldownLadder[^1];
             _oauthCooldownUntil = DateTimeOffset.UtcNow + cd;
             _oauthRateLimitStreak++;
             DiagnosticLog.Warn($"Claude oauth/usage rate limited; cooldown {cd.TotalMinutes:0.#} minutes");
@@ -563,8 +566,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
             if (resp.StatusCode == HttpStatusCode.TooManyRequests)
             {
-                DiagnosticLog.Warn("Claude oauth/usage HTTP 429");
-                return ProviderResult.RateLimit("oauth/usage HTTP 429");
+                TimeSpan? retryAfter = ReadRetryAfter(resp);
+                string suffix = retryAfter is null ? string.Empty : $" retry-after {retryAfter.Value.TotalSeconds:0.#}s";
+                DiagnosticLog.Warn($"Claude oauth/usage HTTP 429{suffix}");
+                return ProviderResult.RateLimit("oauth/usage HTTP 429", retryAfter);
             }
 
             if (!resp.IsSuccessStatusCode)
@@ -696,6 +701,17 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         value = null;
         return false;
+    }
+
+    private static TimeSpan? ReadRetryAfter(HttpResponseMessage resp)
+    {
+        if (resp.Headers.RetryAfter is not { } retryAfter)
+            return null;
+
+        TimeSpan delay = retryAfter.Delta
+            ?? (retryAfter.Date is { } date ? date - DateTimeOffset.UtcNow : TimeSpan.Zero);
+
+        return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
     }
 
     private static UsageSnapshot Merge(UsageSnapshot primary, UsageSnapshot fallback) => new()
@@ -915,15 +931,16 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         UsageSnapshot? Snapshot,
         bool AuthFailed,
         bool RateLimited,
-        string? Error)
+        string? Error,
+        TimeSpan? RetryAfter)
     {
-        public static ProviderResult Ok(UsageSnapshot snap) => new(snap, false, false, null);
-        public static ProviderResult Auth() => new(null, true, false, null);
-        public static ProviderResult RateLimit(string error) => new(null, false, true, error);
-        public static ProviderResult Failed(string error) => new(null, false, false, error);
+        public static ProviderResult Ok(UsageSnapshot snap) => new(snap, false, false, null, null);
+        public static ProviderResult Auth() => new(null, true, false, null, null);
+        public static ProviderResult RateLimit(string error, TimeSpan? retryAfter = null) => new(null, false, true, error, retryAfter);
+        public static ProviderResult Failed(string error) => new(null, false, false, error, null);
         // Used when we deliberately did not attempt this path (e.g. OAuth in cooldown).
         // Distinguished from Failed so the "both endpoints failed" error doesn't surface
         // a misleading "skipped" message when the fallback is what actually failed.
-        public static ProviderResult Skipped() => new(null, false, false, null);
+        public static ProviderResult Skipped() => new(null, false, false, null, null);
     }
 }
