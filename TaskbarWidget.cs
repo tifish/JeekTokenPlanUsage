@@ -40,8 +40,6 @@ internal sealed class TaskbarWidget : IDisposable
     private const int RowGap = 5;
     private const int FontPx = 12;
 
-    private const double WarnPercent = 80;
-
     private const int GWL_STYLE = -16;
     private const int GWL_EXSTYLE = -20;
     private const int WS_CHILD = 0x40000000;
@@ -350,13 +348,7 @@ internal sealed class TaskbarWidget : IDisposable
 
         // Opaque background matching the taskbar color (no transparency).
         Color bgColor = dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 243, 243, 243);
-        // Keyed on the taskbar theme (not the app theme). The warning amber matches
-        // the tray icon; errors stay red.
-        Color textColor = dark ? Color.FromArgb(255, 255, 255) : Color.FromArgb(0, 0, 0);
-        Color mutedColor = dark ? Color.FromArgb(170, 170, 170) : Color.FromArgb(110, 110, 110);
         Color trackColor = dark ? Color.FromArgb(72, 72, 72) : Color.FromArgb(205, 205, 205);
-        Color warnColor = dark ? Color.FromArgb(255, 214, 10) : Color.FromArgb(160, 120, 0);
-        Color dangerColor = dark ? Color.FromArgb(235, 90, 90) : Color.FromArgb(200, 30, 30);
 
         float fontPx = Sc(FontPx);
         using var font = new Font("Segoe UI", fontPx, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -447,9 +439,9 @@ internal sealed class TaskbarWidget : IDisposable
                 int lw = colLabelW[ci], pw = colPctW[ci], rw = colRemainW[ci];
                 int prg = rw > 0 ? Sc(PctRemainGap) : 0;
                 DrawCell(g, font, boldFont, c.Primary, x, row1, rowH, lw, labelGap, barW, barH, barPctGap, pw,
-                    prg, rw, textColor, mutedColor, trackColor, warnColor, dangerColor);
+                    prg, rw, trackColor);
                 DrawCell(g, font, boldFont, c.Secondary, x, row2, rowH, lw, labelGap, barW, barH, barPctGap, pw,
-                    prg, rw, textColor, mutedColor, trackColor, warnColor, dangerColor);
+                    prg, rw, trackColor);
                 x += colCellW[ci] + colGap;
             }
         }
@@ -462,7 +454,7 @@ internal sealed class TaskbarWidget : IDisposable
         Graphics g, Font font, Font boldFont, Cell cell, int x, int top, int rowH,
         int labelW, int labelGap, int barW, int barH, int barPctGap, int pctW,
         int pctRemainGap, int remainW,
-        Color textColor, Color mutedColor, Color trackColor, Color warnColor, Color dangerColor)
+        Color trackColor)
     {
         using var labelFmt = new StringFormat(StringFormat.GenericTypographic)
         {
@@ -491,13 +483,9 @@ internal sealed class TaskbarWidget : IDisposable
                     FillRounded(g, fill, barX, barY, fillW, barH);
         }
 
-        // Percentage in bold; amber when high, red on error, otherwise default text.
+        // All text in a provider cell uses the provider accent for quick scanning.
         string pctText = PctText(cell);
-        Color pctColor =
-            cell.IsError ? dangerColor
-            : cell.Percent is not double p ? mutedColor
-            : p >= WarnPercent ? warnColor
-            : textColor;
+        Color providerTextColor = cell.LabelColor;
 
         int textX = barX + barW + barPctGap;
 
@@ -508,11 +496,10 @@ internal sealed class TaskbarWidget : IDisposable
             LineAlignment = StringAlignment.Center,
             FormatFlags = StringFormatFlags.NoWrap,
         })
-        using (var pctBrush = new SolidBrush(pctColor))
+        using (var pctBrush = new SolidBrush(providerTextColor))
             g.DrawString(pctText, boldFont, pctBrush, new RectangleF(textX, top, pctW, rowH), pctFmt);
 
-        // Reset countdown, left-aligned just after the percentage column, in the
-        // default text color.
+        // Reset countdown, left-aligned just after the percentage column.
         if (remainW > 0)
         {
             string remain = RemainText(cell);
@@ -524,7 +511,7 @@ internal sealed class TaskbarWidget : IDisposable
                     LineAlignment = StringAlignment.Center,
                     FormatFlags = StringFormatFlags.NoWrap,
                 };
-                using var remainBrush = new SolidBrush(textColor);
+                using var remainBrush = new SolidBrush(providerTextColor);
                 int remainX = textX + pctW + pctRemainGap;
                 g.DrawString(remain, font, remainBrush, new RectangleF(remainX, top, remainW, rowH), remainFmt);
             }

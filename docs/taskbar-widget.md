@@ -4,6 +4,8 @@
 
 参考 [CodeZeno/Claude-Code-Usage-Monitor](https://github.com/CodeZeno/Claude-Code-Usage-Monitor)：在任务栏上（时钟/托盘左侧）显示每个 provider 两个时间窗口的进度条 + 百分比 + 重置剩余时间。每格形如 `CL 5h ▓░ 24% 3h`（剩余时间只显示最大单位以省空间）。剩余时间用 1 秒定时器在分钟变化时重绘以保持实时（见 [`OnTick`](../TaskbarWidget.cs)）。
 
+组件内所有文字（窗口标签、百分比、剩余时间、错误占位）都使用对应 provider 的主色，便于快速区分 Claude / Codex / Cursor。
+
 ## 为什么不用 Windows AppBar
 
 AppBar（`SHAppBarMessage` + `ABM_NEW/SETPOS`）会在屏幕某条边上**预留一整条**空间，对一个小组件来说太占地方，而且与本就是 AppBar 的任务栏会互相挤位置。参考项目和本实现都不用 AppBar，而是把窗口**嵌进任务栏本体**。
