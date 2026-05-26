@@ -67,18 +67,10 @@ public sealed class CursorUsageProvider : IUsageProvider
         req.Headers.Referrer = new Uri(DashboardReferer);
         req.Headers.Accept.ParseAdd("*/*");
 
-        HttpResponseMessage resp;
         try
         {
-            resp = await _http.SendAsync(req, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return (null, string.Format(Strings.Error_NetworkFormat, ex.Message));
-        }
+            using HttpResponseMessage resp = await _http.SendAsync(req, ct);
 
-        using (resp)
-        {
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 return (null, Strings.Cursor_TokenInvalid);
             if (resp.StatusCode == HttpStatusCode.TooManyRequests)
@@ -86,7 +78,14 @@ public sealed class CursorUsageProvider : IUsageProvider
             if (!resp.IsSuccessStatusCode)
                 return (null, $"HTTP {(int)resp.StatusCode}");
 
+            // Body read kept inside the same try so a socket abort during the
+            // body read (e.g. sleep/wake, network change) surfaces as a graceful
+            // error instead of an unhandled SocketException 995.
             return (await resp.Content.ReadAsStringAsync(ct), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (null, string.Format(Strings.Error_NetworkFormat, ex.Message));
         }
     }
 

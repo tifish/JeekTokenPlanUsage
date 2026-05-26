@@ -118,18 +118,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         req.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
 
-        HttpResponseMessage resp;
+        string body;
         try
         {
-            resp = await _http.SendAsync(req, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return ProviderResult.Failed(string.Format(Strings.Error_NetworkFormat, ex.Message));
-        }
+            using HttpResponseMessage resp = await _http.SendAsync(req, ct);
 
-        using (resp)
-        {
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 return ProviderResult.Auth();
 
@@ -139,22 +132,30 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             if (!resp.IsSuccessStatusCode)
                 return ProviderResult.Failed($"oauth/usage HTTP {(int)resp.StatusCode}");
 
-            string body = await resp.Content.ReadAsStringAsync(ct);
-            try
+            // Body read kept inside the same try: a socket abort during the
+            // body read (e.g. app shutdown, network reset) raises SocketException
+            // 995 here, not from SendAsync.
+            body = await resp.Content.ReadAsStringAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ProviderResult.Failed(string.Format(Strings.Error_NetworkFormat, ex.Message));
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            JsonElement root = doc.RootElement;
+            var snap = new UsageSnapshot
             {
-                using var doc = JsonDocument.Parse(body);
-                JsonElement root = doc.RootElement;
-                var snap = new UsageSnapshot
-                {
-                    FiveHour = ParseOauthMetric(root, "five_hour"),
-                    Weekly = ParseOauthMetric(root, "seven_day"),
-                };
-                return ProviderResult.Ok(snap);
-            }
-            catch (JsonException ex)
-            {
-                return ProviderResult.Failed(string.Format(Strings.Error_ParseFormat, ex.Message));
-            }
+                FiveHour = ParseOauthMetric(root, "five_hour"),
+                Weekly = ParseOauthMetric(root, "seven_day"),
+            };
+            return ProviderResult.Ok(snap);
+        }
+        catch (JsonException ex)
+        {
+            return ProviderResult.Failed(string.Format(Strings.Error_ParseFormat, ex.Message));
         }
     }
 
