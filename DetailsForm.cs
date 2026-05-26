@@ -16,6 +16,7 @@ internal sealed class DetailsForm : Form
         string? Error);
 
     private const int IndicatorSize = 10;
+    private const int IndicatorOpticalOffset = 4;
     private const int RowVPad = 4;
 
     // Mirrors IconRenderer's warn threshold so the popup and icon flag the same
@@ -333,8 +334,8 @@ internal sealed class DetailsForm : Form
             Indicator = new Panel
             {
                 Size = new Size(IndicatorSize, IndicatorSize),
-                Margin = new Padding(0, RowVPad + 5, 8, RowVPad),
-                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                Margin = new Padding(0, RowVPad + IndicatorOpticalOffset, 8, RowVPad),
+                Anchor = AnchorStyles.Left,
             },
             Name = new Label
             {
