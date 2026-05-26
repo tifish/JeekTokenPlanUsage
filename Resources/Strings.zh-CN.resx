@@ -99,6 +99,12 @@
   <data name="Claude_TokenInvalid" xml:space="preserve">
     <value>Token 失效 (401)，请在 Claude Code 中重新登录</value>
   </data>
+  <data name="Claude_AuthRequiredTitle" xml:space="preserve">
+    <value>需要重新登录 Claude</value>
+  </data>
+  <data name="Claude_AuthRequiredBody" xml:space="preserve">
+    <value>请在终端运行 'claude'，使用 /login 登录，然后刷新本应用。</value>
+  </data>
   <data name="Claude_CredNotFound" xml:space="preserve">
     <value>未找到 ~/.claude/.credentials.json</value>
   </data>

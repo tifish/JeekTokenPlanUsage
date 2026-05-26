@@ -62,6 +62,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private bool _claudeBusy;
     private bool _claudeAuthPaused;
+    private bool _claudeAuthNotified;
     private bool _codexBusy;
     private bool _cursorBusy;
     private bool _disposed;
@@ -195,6 +196,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.Save();
             _showClaudeItem.Checked = next;
             _claudeIcons.ApplyMode(EffectiveMode(next));
+            if (!next)
+                ResetClaudeAuthState();
             ApplyTimers();
             UpdateAnchor();
             UpdateWidget();
@@ -519,11 +522,11 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _claudeRetryCount = 0;
                 _claudeAuthCredentialSignature = await Task.Run(ClaudeUsageProvider.CredentialWatchSignature);
                 _claudeTimer.Interval = _baseIntervalMs;
+                NotifyClaudeAuthErrorOnce();
             }
             else
             {
-                _claudeAuthPaused = false;
-                _claudeAuthCredentialSignature = string.Empty;
+                ResetClaudeAuthState();
                 // Setting Interval restarts the countdown — exactly what we want for
                 // adapting cadence (backoff on error, fast-poll right after reset).
                 _claudeTimer.Interval = NextClaudeIntervalMs(snap);
@@ -557,6 +560,24 @@ public sealed class TrayApplicationContext : ApplicationContext
             || (snap.Weekly?.ResetsAt is { } b && b <= now);
 
         return pastReset ? (int)ClaudeFastPollAfterReset.TotalMilliseconds : _baseIntervalMs;
+    }
+
+    private void NotifyClaudeAuthErrorOnce()
+    {
+        if (_claudeAuthNotified)
+            return;
+
+        _claudeAuthNotified = true;
+        bool shown = _claudeIcons.ShowNotification(Strings.Claude_AuthRequiredTitle, Strings.Claude_AuthRequiredBody);
+        if (!shown)
+            _anchor.ShowNotification(Strings.Claude_AuthRequiredTitle, Strings.Claude_AuthRequiredBody);
+    }
+
+    private void ResetClaudeAuthState()
+    {
+        _claudeAuthPaused = false;
+        _claudeAuthNotified = false;
+        _claudeAuthCredentialSignature = string.Empty;
     }
 
     private async Task RefreshCodexAsync()
@@ -870,6 +891,17 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (_mode == IconDisplayMode.None)
                 return;
             RenderState(snap);
+        }
+
+        public bool ShowNotification(string title, string message)
+        {
+            return _mode switch
+            {
+                IconDisplayMode.Double => _primary.ShowNotification(title, message),
+                IconDisplayMode.Single when _singleModeWindow == SingleModeWindow.Primary => _primary.ShowNotification(title, message),
+                IconDisplayMode.Single => _secondary.ShowNotification(title, message),
+                _ => false,
+            };
         }
 
         private void RenderState(UsageSnapshot snap)

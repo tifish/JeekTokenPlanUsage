@@ -182,9 +182,9 @@ internal sealed class TrayIcon : IDisposable
     /// null) limits. Re-asserts the full flag set used by Modify() so the
     /// standard tooltip stays enabled — under NOTIFYICON_VERSION_4, NIF_SHOWTIP
     /// is a state bit and gets dropped if any NIM_MODIFY call omits it.
-    public void ShowNotification(string title, string message)
+    public bool ShowNotification(string title, string message)
     {
-        if (!_added) return;
+        if (!_added) return false;
         string t = title ?? string.Empty;
         if (t.Length > 63) t = t[..63];
         string m = message ?? string.Empty;
@@ -194,7 +194,7 @@ internal sealed class TrayIcon : IDisposable
         data.szInfoTitle = t;
         data.szInfo = m;
         data.dwInfoFlags = NIIF_WARNING | NIIF_RESPECT_QUIET_TIME;
-        Shell_NotifyIconW(NIM_MODIFY, ref data);
+        return Shell_NotifyIconW(NIM_MODIFY, ref data);
     }
 
     private void Remove()

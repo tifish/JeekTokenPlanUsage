@@ -99,6 +99,12 @@
   <data name="Claude_TokenInvalid" xml:space="preserve">
     <value>Token invalid (401). Please re-login in Claude Code.</value>
   </data>
+  <data name="Claude_AuthRequiredTitle" xml:space="preserve">
+    <value>Claude login required</value>
+  </data>
+  <data name="Claude_AuthRequiredBody" xml:space="preserve">
+    <value>Run 'claude' in a terminal, use /login, then refresh this app.</value>
+  </data>
   <data name="Claude_CredNotFound" xml:space="preserve">
     <value>Not found: ~/.claude/.credentials.json</value>
   </data>
