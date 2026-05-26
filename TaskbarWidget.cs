@@ -374,7 +374,7 @@ internal sealed class TaskbarWidget : IDisposable
         using (var mb = new Bitmap(1, 1))
         using (var mg = Graphics.FromImage(mb))
         {
-            mg.TextRenderingHint = TextRenderingHint.AntiAlias;
+            mg.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             for (int ci = 0; ci < n; ci++)
             {
                 Column c = _columns[ci];
@@ -415,7 +415,10 @@ internal sealed class TaskbarWidget : IDisposable
         {
             g.Clear(bgColor);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            // ClearTypeGridFit (subpixel + hinting) is safe because the widget
+            // has an opaque background; AntiAlias would render small UI text
+            // blurry due to lack of grid alignment.
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
             // Left grab-handle divider (also signals the widget is draggable).
