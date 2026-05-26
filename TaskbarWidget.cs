@@ -439,9 +439,9 @@ internal sealed class TaskbarWidget : IDisposable
                 int lw = colLabelW[ci], pw = colPctW[ci], rw = colRemainW[ci];
                 int prg = rw > 0 ? Sc(PctRemainGap) : 0;
                 DrawCell(g, font, boldFont, c.Primary, x, row1, rowH, lw, labelGap, barW, barH, barPctGap, pw,
-                    prg, rw, trackColor);
+                    prg, rw, trackColor, dark);
                 DrawCell(g, font, boldFont, c.Secondary, x, row2, rowH, lw, labelGap, barW, barH, barPctGap, pw,
-                    prg, rw, trackColor);
+                    prg, rw, trackColor, dark);
                 x += colCellW[ci] + colGap;
             }
         }
@@ -454,8 +454,10 @@ internal sealed class TaskbarWidget : IDisposable
         Graphics g, Font font, Font boldFont, Cell cell, int x, int top, int rowH,
         int labelW, int labelGap, int barW, int barH, int barPctGap, int pctW,
         int pctRemainGap, int remainW,
-        Color trackColor)
+        Color trackColor,
+        bool dark)
     {
+        Color textColor = ThemeTextColor(cell.LabelColor, dark);
         using var labelFmt = new StringFormat(StringFormat.GenericTypographic)
         {
             Alignment = StringAlignment.Near,
@@ -464,7 +466,7 @@ internal sealed class TaskbarWidget : IDisposable
         };
         // Window label (5h / 7d / Auto …) painted in the provider's bright accent —
         // the color identifies the provider now that there's no text prefix.
-        using var labelBrush = new SolidBrush(cell.LabelColor);
+        using var labelBrush = new SolidBrush(textColor);
         g.DrawString(cell.Label, font, labelBrush, new RectangleF(x, top, labelW, rowH), labelFmt);
 
         // Bar track.
@@ -483,9 +485,8 @@ internal sealed class TaskbarWidget : IDisposable
                     FillRounded(g, fill, barX, barY, fillW, barH);
         }
 
-        // All text in a provider cell uses the provider accent for quick scanning.
+        // All text in a provider cell uses the provider accent, contrast-tuned for the taskbar theme.
         string pctText = PctText(cell);
-        Color providerTextColor = cell.LabelColor;
 
         int textX = barX + barW + barPctGap;
 
@@ -496,7 +497,7 @@ internal sealed class TaskbarWidget : IDisposable
             LineAlignment = StringAlignment.Center,
             FormatFlags = StringFormatFlags.NoWrap,
         })
-        using (var pctBrush = new SolidBrush(providerTextColor))
+        using (var pctBrush = new SolidBrush(textColor))
             g.DrawString(pctText, boldFont, pctBrush, new RectangleF(textX, top, pctW, rowH), pctFmt);
 
         // Reset countdown, left-aligned just after the percentage column.
@@ -511,11 +512,24 @@ internal sealed class TaskbarWidget : IDisposable
                     LineAlignment = StringAlignment.Center,
                     FormatFlags = StringFormatFlags.NoWrap,
                 };
-                using var remainBrush = new SolidBrush(providerTextColor);
+                using var remainBrush = new SolidBrush(textColor);
                 int remainX = textX + pctW + pctRemainGap;
                 g.DrawString(remain, font, remainBrush, new RectangleF(remainX, top, remainW, rowH), remainFmt);
             }
         }
+    }
+
+    private static Color ThemeTextColor(Color color, bool dark) =>
+        Blend(color, dark ? Color.White : Color.Black, dark ? 0.34 : 0.30);
+
+    private static Color Blend(Color source, Color target, double amount)
+    {
+        int BlendChannel(int s, int t) => (int)Math.Round(s + (t - s) * amount);
+        return Color.FromArgb(
+            source.A,
+            BlendChannel(source.R, target.R),
+            BlendChannel(source.G, target.G),
+            BlendChannel(source.B, target.B));
     }
 
     private void FillRounded(Graphics g, Brush brush, int x, int y, int w, int h)
