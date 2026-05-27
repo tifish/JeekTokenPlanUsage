@@ -101,6 +101,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _languageAutoItem = null!;
     private ToolStripMenuItem _notifyItem = null!;
     private ToolStripMenuItem _widgetItem = null!;
+    private ToolStripMenuItem _openLogItem = null!;
     private ToolStripMenuItem _exitItem = null!;
 
     public TrayApplicationContext()
@@ -278,6 +279,37 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
     }
 
+    private static void OpenLogFile()
+    {
+        // Touch the file first so the shell-launched editor opens an existing
+        // file rather than prompting "create new?". Any failure here just falls
+        // through to ShellExecute, which will surface the real reason.
+        string path = DiagnosticLog.FilePath;
+        try
+        {
+            if (!File.Exists(path))
+                DiagnosticLog.Info("Log file opened from tray menu");
+        }
+        catch { }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                ex.Message,
+                "JeekTokenPlanUsage",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
     private void OnWidgetOffsetChanged(int offset)
     {
         _settings.TaskbarWidgetOffset = offset;
@@ -423,6 +455,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _languageAutoItem.Text = Strings.Menu_LanguageAuto;
         _notifyItem.Text = Strings.Menu_EnableNotifications;
         _widgetItem.Text = Strings.Menu_ShowTaskbarWidget;
+        _openLogItem.Text = Strings.Menu_OpenLog;
         _exitItem.Text = Strings.Menu_Exit;
         foreach (ToolStripItem raw in _iconDisplayParent.DropDownItems)
             if (raw is ToolStripMenuItem mi && mi.Tag is IconDisplayMode mode)
@@ -486,6 +519,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         _notifyItem = new ToolStripMenuItem(Strings.Menu_EnableNotifications);
         _widgetItem = new ToolStripMenuItem(Strings.Menu_ShowTaskbarWidget);
 
+        _openLogItem = new ToolStripMenuItem(Strings.Menu_OpenLog);
+        _openLogItem.Click += (_, _) => OpenLogFile();
+
         _exitItem = new ToolStripMenuItem(Strings.Menu_Exit);
         _exitItem.Click += (_, _) => ExitThread();
 
@@ -502,6 +538,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_intervalParent);
         menu.Items.Add(_languageItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_openLogItem);
         menu.Items.Add(_exitItem);
 
         return menu;

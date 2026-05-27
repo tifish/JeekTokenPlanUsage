@@ -28,6 +28,7 @@ internal static class Strings
     public static string Menu_LanguageAuto => Get(nameof(Menu_LanguageAuto));
     public static string Menu_EnableNotifications => Get(nameof(Menu_EnableNotifications));
     public static string Menu_ShowTaskbarWidget => Get(nameof(Menu_ShowTaskbarWidget));
+    public static string Menu_OpenLog => Get(nameof(Menu_OpenLog));
     public static string Menu_Exit => Get(nameof(Menu_Exit));
 
     public static string Notify_Title => Get(nameof(Notify_Title));

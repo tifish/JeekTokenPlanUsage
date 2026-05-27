@@ -4,7 +4,10 @@ internal static class DiagnosticLog
 {
     private const long MaxBytes = 512 * 1024;
     private static readonly object Gate = new();
-    private static readonly string Path =
+
+    /// Absolute path of the current log file. Exposed so menu actions can open
+    /// it; logging itself never throws if the file is missing.
+    public static string FilePath { get; } =
         System.IO.Path.Combine(System.IO.Path.GetTempPath(), "JeekTokenPlanUsage.log");
 
     public static void Info(string message) => Write("INFO", message);
@@ -21,7 +24,7 @@ internal static class DiagnosticLog
             {
                 RotateIfNeeded();
                 string line = $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] {message}{Environment.NewLine}";
-                File.AppendAllText(Path, line);
+                File.AppendAllText(FilePath, line);
             }
         }
         catch
@@ -34,13 +37,13 @@ internal static class DiagnosticLog
     {
         try
         {
-            var info = new FileInfo(Path);
+            var info = new FileInfo(FilePath);
             if (info.Exists && info.Length > MaxBytes)
             {
-                string oldPath = Path + ".old";
+                string oldPath = FilePath + ".old";
                 if (File.Exists(oldPath))
                     File.Delete(oldPath);
-                File.Move(Path, oldPath);
+                File.Move(FilePath, oldPath);
             }
         }
         catch

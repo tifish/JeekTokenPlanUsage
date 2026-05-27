@@ -54,6 +54,9 @@
   <data name="Menu_ShowTaskbarWidget" xml:space="preserve">
     <value>在任务栏显示组件</value>
   </data>
+  <data name="Menu_OpenLog" xml:space="preserve">
+    <value>打开日志文件</value>
+  </data>
   <data name="Menu_Exit" xml:space="preserve">
     <value>退出</value>
   </data>
