@@ -32,7 +32,7 @@ AppBar（`SHAppBarMessage` + `ABM_NEW/SETPOS`）会在屏幕某条边上**预留
 
 配色跟随**系统（Windows）主题**而非应用主题：组件画在任务栏上，任务栏底色由 `SystemUsesLightTheme`（注册表 `…\Themes\Personalize`）决定，可能与应用主题不同，所以读它而不是 `Application.IsDarkModeEnabled`。
 
-主题切换**即时响应**：[TrayApplicationContext](../TrayApplicationContext.cs) 里的 `ThemeChangeListener`（一个顶层隐藏窗口）监听系统广播 `WM_SETTINGCHANGE("ImmersiveColorSet")` / `WM_THEMECHANGED`，收到后立刻通知组件和详情面板重绘（组件是任务栏的子窗口、收不到广播，必须由顶层窗口代收）。每秒的 `OnTick` 再读一次注册表作为兜底。
+主题 / DPI 切换**即时响应**：[TrayApplicationContext](../TrayApplicationContext.cs) 里的 `SystemChangeListener`（一个顶层隐藏窗口）监听系统广播 `WM_SETTINGCHANGE("ImmersiveColorSet")` / `WM_THEMECHANGED` / `WM_DISPLAYCHANGE` / `WM_DPICHANGED`，收到后立刻通知组件重绘（组件是任务栏的子窗口、可能收不到广播，必须由顶层窗口代收）。每秒的 `OnTick` 再检测任务栏高度和主题作为兜底。
 
 ### 拖动调整位置
 

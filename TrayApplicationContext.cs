@@ -63,7 +63,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private Icon? _anchorIcon;
     private readonly DetailsForm _detailsForm;
     private readonly TaskbarWidget _taskbarWidget;
-    private readonly ThemeChangeListener _themeListener;
+    private readonly SystemChangeListener _systemChangeListener;
 
     private UsageSnapshot? _claudeSnap;
     private UsageSnapshot? _codexSnap;
@@ -169,8 +169,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         _taskbarWidget = new TaskbarWidget(
             menu, onLeftClick, OnWidgetOffsetChanged, _settings.TaskbarWidgetOffset);
 
-        // Repaint every theme-aware surface the instant the OS toggles light/dark.
-        _themeListener = new ThemeChangeListener(OnSystemThemeChanged);
+        // Repaint theme/display-aware surfaces as soon as Windows broadcasts changes.
+        _systemChangeListener = new SystemChangeListener(OnSystemThemeChanged, OnDisplayMetricsChanged);
 
         _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
         _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
@@ -297,6 +297,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         try { Application.SetColorMode(SystemColorMode.System); } catch { }
         _detailsForm.NotifyThemeChanged();
         _taskbarWidget.NotifyThemeChanged();
+    }
+
+    private void OnDisplayMetricsChanged()
+    {
+        if (_disposed)
+            return;
+        _taskbarWidget.NotifyDisplayChanged();
     }
 
     private void UpdateAnchor()
@@ -891,7 +898,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _anchorIcon?.Dispose();
             _detailsForm.Dispose();
             _taskbarWidget.Dispose();
-            _themeListener.Dispose();
+            _systemChangeListener.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -901,34 +908,45 @@ public sealed class TrayApplicationContext : ApplicationContext
     /// monthly billing cycles) or can omit it (short windows like 5-hour).
     private sealed record WindowSpec(Color Bg, string Label, bool LongDate);
 
-    /// Hidden top-level window that listens for the system light/dark switch.
+    /// Hidden top-level window that listens for system theme and display changes.
     /// Windows broadcasts WM_SETTINGCHANGE("ImmersiveColorSet") (and WM_THEMECHANGED)
     /// to top-level windows only — our embedded taskbar widget is a child window and
-    /// wouldn't receive it, so we watch here and fan the notification out. The handle
-    /// is created on the UI thread, so WndProc (and the callback) run there too.
-    private sealed class ThemeChangeListener : NativeWindow, IDisposable
+    /// wouldn't reliably receive it, so we watch here and fan notifications out.
+    /// The handle is created on the UI thread, so WndProc and callbacks run there.
+    private sealed class SystemChangeListener : NativeWindow, IDisposable
     {
         private const int WM_SETTINGCHANGE = 0x001A;
+        private const int WM_DISPLAYCHANGE = 0x007E;
         private const int WM_THEMECHANGED = 0x031A;
+        private const int WM_DPICHANGED = 0x02E0;
 
-        private readonly Action _onChange;
+        private readonly Action _onThemeChange;
+        private readonly Action _onDisplayChange;
 
-        public ThemeChangeListener(Action onChange)
+        public SystemChangeListener(Action onThemeChange, Action onDisplayChange)
         {
-            _onChange = onChange;
-            CreateHandle(new CreateParams { Caption = "JeekThemeWatcher" });
+            _onThemeChange = onThemeChange;
+            _onDisplayChange = onDisplayChange;
+            CreateHandle(new CreateParams { Caption = "JeekSystemChangeWatcher" });
         }
 
         protected override void WndProc(ref Message m)
         {
             if (m.Msg == WM_THEMECHANGED)
             {
-                _onChange();
+                _onThemeChange();
             }
-            else if (m.Msg == WM_SETTINGCHANGE && m.LParam != IntPtr.Zero
-                && Marshal.PtrToStringUni(m.LParam) == "ImmersiveColorSet")
+            else if (m.Msg == WM_DISPLAYCHANGE || m.Msg == WM_DPICHANGED)
             {
-                _onChange();
+                _onDisplayChange();
+            }
+            else if (m.Msg == WM_SETTINGCHANGE)
+            {
+                string? area = m.LParam != IntPtr.Zero ? Marshal.PtrToStringUni(m.LParam) : null;
+                if (area == "ImmersiveColorSet")
+                    _onThemeChange();
+                else
+                    _onDisplayChange();
             }
             base.WndProc(ref m);
         }

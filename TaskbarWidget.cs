@@ -62,6 +62,10 @@ internal sealed class TaskbarWidget : IDisposable
     private const int WM_LBUTTONUP = 0x0202;
     private const int WM_RBUTTONUP = 0x0205;
     private const int WM_CONTEXTMENU = 0x007B;
+    private const int WM_DISPLAYCHANGE = 0x007E;
+    private const int WM_DPICHANGED = 0x02E0;
+    private const int WM_DPICHANGED_BEFOREPARENT = 0x02E2;
+    private const int WM_DPICHANGED_AFTERPARENT = 0x02E3;
     private const int MK_LBUTTON = 0x0001;
 
     private const int DragThresholdDip = 3;
@@ -220,6 +224,13 @@ internal sealed class TaskbarWidget : IDisposable
             RefreshVisual();
     }
 
+    /// Recomputes the taskbar-derived scale after display or DPI changes.
+    public void NotifyDisplayChanged()
+    {
+        if (_visible)
+            RefreshVisual();
+    }
+
     private int Sc(int dip) => (int)Math.Round(dip * _scale);
 
     // The measured taskbar height drives both the widget height and its scale —
@@ -259,9 +270,16 @@ internal sealed class TaskbarWidget : IDisposable
     {
         if (_dragging || !_visible || _columns.Count == 0)
             return;
-        Position();
-        if (RemainingSignature() != _lastRemainSig || IsTaskbarDark() != _lastDark)
+
+        bool layoutChanged = TaskbarHeight() != _height;
+        if (layoutChanged || RemainingSignature() != _lastRemainSig || IsTaskbarDark() != _lastDark)
+        {
             Render();
+            Position();
+            return;
+        }
+
+        Position();
     }
 
     // The widget is painted onto the taskbar, whose color follows the Windows
@@ -747,6 +765,12 @@ internal sealed class TaskbarWidget : IDisposable
                 case WM_RBUTTONUP:
                 case WM_CONTEXTMENU:
                     _owner.ShowMenu();
+                    return;
+                case WM_DISPLAYCHANGE:
+                case WM_DPICHANGED:
+                case WM_DPICHANGED_BEFOREPARENT:
+                case WM_DPICHANGED_AFTERPARENT:
+                    _owner.NotifyDisplayChanged();
                     return;
                 default:
                     if (m.Msg == WM_TASKBARCREATED)
