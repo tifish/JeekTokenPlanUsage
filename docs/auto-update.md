@@ -149,12 +149,11 @@ gh-proxy.com      https://gh-proxy.com/github.com/...
 
 ## 配置项
 
-[AppSettings.cs](../AppSettings.cs) 三个相关字段：
+[AppSettings.cs](../AppSettings.cs) 两个相关字段：
 
 ```csharp
 public bool AutoUpdate { get; set; } = true;
 public bool DisableMirrorDownload { get; set; } = false;
-public DateTimeOffset? LastUpdateCheck { get; set; }
 ```
 
 `AppData\Roaming\JeekTokenPlanUsage\settings.json` 持久化。

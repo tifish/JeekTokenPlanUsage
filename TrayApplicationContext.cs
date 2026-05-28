@@ -864,9 +864,6 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (_disposed)
                 return;
 
-            _settings.LastUpdateCheck = DateTimeOffset.UtcNow;
-            try { _settings.Save(); } catch { }
-
             switch (outcome)
             {
                 case UpdateCheckOutcome.Available:

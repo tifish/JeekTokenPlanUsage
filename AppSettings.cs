@@ -75,10 +75,6 @@ internal sealed class AppSettings
     /// occasionally unhealthy.
     public bool DisableMirrorDownload { get; set; } = false;
 
-    /// UTC timestamp of the last completed update check. Persisted for
-    /// diagnostics and to avoid stacking checks across rapid restarts.
-    public DateTimeOffset? LastUpdateCheck { get; set; }
-
     [JsonIgnore]
     public bool RunAtStartup
     {
