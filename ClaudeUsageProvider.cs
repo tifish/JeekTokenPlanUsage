@@ -133,8 +133,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         else if (primary.Snapshot is not null)
         {
-            // OAuth came back fine — reset the cooldown ladder.
-            _oauthRateLimitStreak = 0;
+            // Success decays the streak by one rung instead of resetting outright.
+            // Under alternating 429/success this keeps the ladder elevated so the
+            // next cooldown widens, letting probe cadence converge on a value the
+            // endpoint actually tolerates — and WARN volume drops with it.
+            if (_oauthRateLimitStreak > 0)
+                _oauthRateLimitStreak--;
             _oauthCooldownUntil = DateTimeOffset.MinValue;
         }
 
