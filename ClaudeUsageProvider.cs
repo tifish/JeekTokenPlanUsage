@@ -174,16 +174,14 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         CredentialSource? skipRefreshFor,
         ClaudeCredential? rejected)
     {
-        List<CredentialSource> sources = GetCredentialSources().ToList();
-        if (sources.Count == 0)
-        {
-            DiagnosticLog.Warn("Claude credential resolution found no Windows credentials or running WSL sources");
-            return new(null, Strings.Claude_CredNotFound);
-        }
-
+        // GetCredentialSources() yields Windows first, then WSL — iterating lazily
+        // (no ToList) means WSL enumeration only runs as a fallback when Windows
+        // credentials are absent or unusable.
         string? lastError = null;
-        foreach (CredentialSource source in sources)
+        bool anySource = false;
+        foreach (CredentialSource source in GetCredentialSources())
         {
+            anySource = true;
             ClaudeCredential? credential = ReadCredential(source, out string? error);
             if (credential is null)
             {
@@ -217,6 +215,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
             DiagnosticLog.Warn($"Claude credential refresh did not produce usable credentials for {SourceLabel(source)}");
             lastError = error ?? lastError;
+        }
+
+        if (!anySource)
+        {
+            DiagnosticLog.Warn("Claude credential resolution found no Windows credentials or running WSL sources");
+            return new(null, Strings.Claude_CredNotFound);
         }
 
         return new(null, lastError ?? Strings.Claude_ReadCredFailed);
