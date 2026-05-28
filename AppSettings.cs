@@ -64,6 +64,21 @@ internal sealed class AppSettings
     /// settings.json files. New writes leave it at 0; see Load().
     public int ClaudePollMinutes { get; set; }
 
+    /// Periodically check the GitHub `latest_release` artifact and, when newer
+    /// than the local exe, silently relaunch into the updater script. Off-by-default
+    /// auto-update would surprise users who installed manually, so the default
+    /// is on — toggle from the tray menu to opt out.
+    public bool AutoUpdate { get; set; } = true;
+
+    /// Skip GitHub-mirror probing and download directly from github.com.
+    /// Useful for users outside China where the mirrors are slower or
+    /// occasionally unhealthy.
+    public bool DisableMirrorDownload { get; set; } = false;
+
+    /// UTC timestamp of the last completed update check. Persisted for
+    /// diagnostics and to avoid stacking checks across rapid restarts.
+    public DateTimeOffset? LastUpdateCheck { get; set; }
+
     [JsonIgnore]
     public bool RunAtStartup
     {

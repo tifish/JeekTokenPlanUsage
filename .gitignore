@@ -1,14 +1,25 @@
-# Build output
-bin/
+# Build output. `bin/*` rather than `bin/` so the directory itself is
+# traversed and the AutoUpdate.ps1 exception below can re-include one file.
+bin/*
 obj/
 [Dd]ebug/
 [Rr]elease/
 x64/
 x86/
 
+# AutoUpdate.ps1 lives in bin/ as a tracked file (the canonical source —
+# there is no copy at the project root). Re-includes the single file while
+# the rest of bin/ stays ignored.
+!bin/AutoUpdate.ps1
+
 # Publish artifacts
 *.7z
 *.zip
+
+# CI-only artifact written by the workflow into the runner workspace; never
+# meant to be committed. Listed here as a tripwire in case someone runs the
+# version.txt-writing PowerShell locally while debugging.
+version.txt
 
 # Visual Studio / Rider / VS Code
 .vs/

@@ -25,14 +25,23 @@ jobs:
                   fetch-depth: 0
                   submodules: true
 
+            - name: Compute commit count
+              id: ver
+              shell: pwsh
+              run: |
+                  $count = (git rev-list --count HEAD).Trim()
+                  "count=$count" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                  Set-Content -Path version.txt -Value $count -NoNewline -Encoding ascii
+                  Write-Host "commit count = $count"
+
             - name: Build
-              run: dotnet publish --configuration Release ${{ env.PROJECT_NAME }}.csproj
+              run: dotnet publish --configuration Release ${{ env.PROJECT_NAME }}.csproj /p:Version=${{ steps.ver.outputs.count }}
 
             - name: Pack files
+              shell: pwsh
               run: |
-                  cd bin
-                  7z a -r ..\${{ env.PROJECT_NAME }}.7z *
-                  cd ..
+                  Get-ChildItem -Path bin -Filter *.pdb -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
+                  Compress-Archive -Path bin\* -DestinationPath ${{ env.PROJECT_NAME }}.zip -Force
 
             - name: Delete release and tag
               run: gh release delete ${{ env.RELEASE_TAG }} --cleanup-tag -y
@@ -41,5 +50,7 @@ jobs:
             - name: Create a new tag and release
               run: gh release create ${{ env.RELEASE_TAG }} --generate-notes
 
-            - name: Upload pack
-              run: gh release upload ${{ env.RELEASE_TAG }} ${{ env.PROJECT_NAME }}.7z --clobber
+            - name: Upload artifacts
+              run: |
+                  gh release upload ${{ env.RELEASE_TAG }} ${{ env.PROJECT_NAME }}.zip --clobber
+                  gh release upload ${{ env.RELEASE_TAG }} version.txt --clobber

@@ -102,7 +102,14 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _notifyItem = null!;
     private ToolStripMenuItem _widgetItem = null!;
     private ToolStripMenuItem _openLogItem = null!;
+    private ToolStripMenuItem _checkUpdateItem = null!;
+    private ToolStripMenuItem _autoUpdateItem = null!;
     private ToolStripMenuItem _exitItem = null!;
+
+    private readonly WinTimer _updateTimer;
+    private bool _updateInProgress;
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(1);
+    private static readonly TimeSpan UpdateInitialDelay = TimeSpan.FromSeconds(5);
 
     public TrayApplicationContext()
     {
@@ -277,6 +284,39 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (next)
                 UpdateWidget();
         };
+
+        _updateTimer = new WinTimer { Interval = (int)UpdateCheckInterval.TotalMilliseconds };
+        _updateTimer.Tick += async (_, _) => await CheckForUpdatesAsync(manual: false);
+        if (_settings.AutoUpdate)
+            _updateTimer.Start();
+
+        _autoUpdateItem.Checked = _settings.AutoUpdate;
+        _autoUpdateItem.Click += (_, _) =>
+        {
+            bool next = !_autoUpdateItem.Checked;
+            _settings.AutoUpdate = next;
+            _settings.Save();
+            _autoUpdateItem.Checked = next;
+            if (next)
+                _updateTimer.Start();
+            else
+                _updateTimer.Stop();
+            // The next hourly tick (or app launch) will pick up any update;
+            // we don't trigger an immediate check on opt-in.
+        };
+
+        // Defer the initial check briefly so we don't compete with the first
+        // poll for network attention, and so a transient startup outage doesn't
+        // immediately log a false negative.
+        var initialDelayTimer = new WinTimer { Interval = (int)UpdateInitialDelay.TotalMilliseconds };
+        initialDelayTimer.Tick += async (s, _) =>
+        {
+            ((WinTimer)s!).Stop();
+            ((WinTimer)s!).Dispose();
+            if (!_disposed && _settings.AutoUpdate)
+                await CheckForUpdatesAsync(manual: false);
+        };
+        initialDelayTimer.Start();
     }
 
     private static void OpenLogFile()
@@ -456,6 +496,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         _notifyItem.Text = Strings.Menu_EnableNotifications;
         _widgetItem.Text = Strings.Menu_ShowTaskbarWidget;
         _openLogItem.Text = Strings.Menu_OpenLog;
+        _checkUpdateItem.Text = Strings.Menu_CheckForUpdates;
+        _autoUpdateItem.Text = Strings.Menu_AutoUpdate;
         _exitItem.Text = Strings.Menu_Exit;
         foreach (ToolStripItem raw in _iconDisplayParent.DropDownItems)
             if (raw is ToolStripMenuItem mi && mi.Tag is IconDisplayMode mode)
@@ -518,9 +560,13 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _notifyItem = new ToolStripMenuItem(Strings.Menu_EnableNotifications);
         _widgetItem = new ToolStripMenuItem(Strings.Menu_ShowTaskbarWidget);
+        _autoUpdateItem = new ToolStripMenuItem(Strings.Menu_AutoUpdate);
 
         _openLogItem = new ToolStripMenuItem(Strings.Menu_OpenLog);
         _openLogItem.Click += (_, _) => OpenLogFile();
+
+        _checkUpdateItem = new ToolStripMenuItem(Strings.Menu_CheckForUpdates);
+        _checkUpdateItem.Click += async (_, _) => await CheckForUpdatesAsync(manual: true);
 
         _exitItem = new ToolStripMenuItem(Strings.Menu_Exit);
         _exitItem.Click += (_, _) => ExitThread();
@@ -530,6 +576,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_startupItem);
         menu.Items.Add(_notifyItem);
         menu.Items.Add(_widgetItem);
+        menu.Items.Add(_autoUpdateItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_showClaudeItem);
         menu.Items.Add(_showCodexItem);
@@ -538,6 +585,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_intervalParent);
         menu.Items.Add(_languageItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_checkUpdateItem);
         menu.Items.Add(_openLogItem);
         menu.Items.Add(_exitItem);
 
@@ -804,6 +852,86 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updateInProgress || _disposed)
+            return;
+        _updateInProgress = true;
+        try
+        {
+            DiagnosticLog.Info($"AutoUpdate check started (manual={manual})");
+            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync(_settings.DisableMirrorDownload);
+            if (_disposed)
+                return;
+
+            _settings.LastUpdateCheck = DateTimeOffset.UtcNow;
+            try { _settings.Save(); } catch { }
+
+            switch (outcome)
+            {
+                case UpdateCheckOutcome.Available:
+                    string body = string.Format(
+                        Strings.Update_FoundBodyFormat,
+                        AutoUpdate.RemoteCommitCount > 0 ? AutoUpdate.RemoteCommitCount.ToString() : "?");
+                    ShowUpdateToast(Strings.Update_FoundTitle, body);
+                    // Give the toast a moment to render before the process exits.
+                    await Task.Delay(800);
+                    if (_disposed)
+                        return;
+                    bool launched = AutoUpdate.LaunchUpdate();
+                    if (!launched && manual)
+                    {
+                        ShowUpdateToast(
+                            Strings.Update_NoneTitle,
+                            string.Format(Strings.Update_FailedFormat, "launch failed"));
+                    }
+                    break;
+
+                case UpdateCheckOutcome.UpToDate when manual:
+                    ShowUpdateToast(Strings.Update_NoneTitle, Strings.Update_NoneBody);
+                    break;
+
+                case UpdateCheckOutcome.Failed when manual:
+                    // Surface failure to the user — they pressed the button and
+                    // deserve to know the check didn't actually conclude. Auto
+                    // checks stay silent (already logged) to avoid nagging.
+                    ShowUpdateToast(
+                        Strings.Update_NoneTitle,
+                        string.Format(Strings.Update_FailedFormat,
+                            string.IsNullOrEmpty(AutoUpdate.FailureReason) ? "unknown" : AutoUpdate.FailureReason));
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Error($"AutoUpdate check threw: {ex.Message}");
+            if (manual)
+            {
+                ShowUpdateToast(
+                    Strings.Update_NoneTitle,
+                    string.Format(Strings.Update_FailedFormat, ex.Message));
+            }
+        }
+        finally
+        {
+            _updateInProgress = false;
+        }
+    }
+
+    private void ShowUpdateToast(string title, string body)
+    {
+        // Route the toast through whichever icon is currently visible.
+        if (_anchor.Visible && _anchor.ShowNotification(title, body))
+            return;
+        if (_settings.ShowClaude && _claudeIcons.ShowNotification(title, body))
+            return;
+        if (_settings.ShowCodex && _codexIcons.ShowNotification(title, body))
+            return;
+        if (_settings.ShowCursor && _cursorIcons.ShowNotification(title, body))
+            return;
+        DiagnosticLog.Warn("AutoUpdate toast had no visible tray icon to surface through");
+    }
+
     private void HandleLeftClick()
     {
         if (_disposed)
@@ -927,6 +1055,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _claudeTimer.Dispose();
             _codexTimer.Dispose();
             _cursorTimer.Dispose();
+            _updateTimer.Dispose();
             _claudeIcons.Dispose();
             _codexIcons.Dispose();
             _cursorIcons.Dispose();

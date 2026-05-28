@@ -57,8 +57,29 @@
   <data name="Menu_OpenLog" xml:space="preserve">
     <value>打开日志文件</value>
   </data>
+  <data name="Menu_CheckForUpdates" xml:space="preserve">
+    <value>检查更新</value>
+  </data>
+  <data name="Menu_AutoUpdate" xml:space="preserve">
+    <value>自动更新</value>
+  </data>
   <data name="Menu_Exit" xml:space="preserve">
     <value>退出</value>
+  </data>
+  <data name="Update_FoundTitle" xml:space="preserve">
+    <value>发现新版本</value>
+  </data>
+  <data name="Update_FoundBodyFormat" xml:space="preserve">
+    <value>即将重启以安装版本 {0}…</value>
+  </data>
+  <data name="Update_NoneTitle" xml:space="preserve">
+    <value>JeekTokenPlanUsage</value>
+  </data>
+  <data name="Update_NoneBody" xml:space="preserve">
+    <value>已是最新版本。</value>
+  </data>
+  <data name="Update_FailedFormat" xml:space="preserve">
+    <value>更新失败：{0}</value>
   </data>
   <data name="Notify_Title" xml:space="preserve">
     <value>用量提醒</value>
