@@ -28,10 +28,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private const int WslProbeTimeoutSeconds = 5;
 
     // Tried in order — the first model whose response carries rate-limit headers wins.
+    // Datless aliases auto-track the latest patch within a model family; only a new
+    // major Haiku release (e.g. 5.0) requires editing this list.
     private static readonly string[] ModelFallbackChain =
     {
-        "claude-3-haiku-20240307",
-        "claude-haiku-4-5-20251001",
+        "claude-haiku-4-5",
     };
 
     // Cooldown applied to the OAuth usage endpoint after a 429. Each consecutive

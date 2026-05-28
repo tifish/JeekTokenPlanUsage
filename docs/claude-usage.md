@@ -34,7 +34,7 @@ Authorization: Bearer <accessToken>
 anthropic-version: 2023-06-01
 anthropic-beta: oauth-2025-04-20
 
-{ "model": "claude-3-haiku-20240307", "max_tokens": 1, "messages": [{"role":"user","content":"."}] }
+{ "model": "claude-haiku-4-5", "max_tokens": 1, "messages": [{"role":"user","content":"."}] }
 ```
 
 不读 body，只读响应头：
