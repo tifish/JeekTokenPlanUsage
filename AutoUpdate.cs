@@ -143,7 +143,7 @@ public static class AutoUpdate
                 Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" \"{DownloadUrl}\"",
                 WorkingDirectory = workDir,
                 UseShellExecute = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
+                WindowStyle = ProcessWindowStyle.Normal,
             });
 
             DiagnosticLog.Info("AutoUpdate: launched updater; exiting");
