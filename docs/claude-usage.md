@@ -48,8 +48,11 @@ anthropic-beta: oauth-2025-04-20
 
 优先级：
 
-1. Windows: `%USERPROFILE%\.claude\.credentials.json`
-2. WSL fallback: 只枚举 `wsl.exe -l -q --running` 返回的运行中 distro，读取 `~/.claude/.credentials.json`
+1. Windows CLI: `%USERPROFILE%\.claude\.credentials.json`
+2. Claude Desktop: `%APPDATA%\Claude\config.json`（CLI 没装时的来源）
+3. WSL fallback: 只枚举 `wsl.exe -l -q --running` 返回的运行中 distro，读取 `~/.claude/.credentials.json`
+
+### CLI / WSL 凭据
 
 读取字段：
 
@@ -62,6 +65,17 @@ anthropic-beta: oauth-2025-04-20
 - WSL: `wsl.exe -d <distro> -- bash -lic "<claude refresh command>"`
 
 刷新命令隐藏运行，最多等待 30 秒。刷新后重新读取凭据；如果当前来源仍不可用，会继续尝试下一个来源。未运行的 WSL distro 不会被探测或启动。
+
+### Claude Desktop 凭据（无需 CLI）
+
+Claude Desktop 把 OAuth token 存在 `config.json` 的 `oauth:tokenCache` 字段，用 Chromium OSCrypt 加密（值以 `v10` 开头）。解密步骤：
+
+1. 读同目录 `Local State` 的 `os_crypt.encrypted_key`，base64 解码后去掉 `DPAPI` 前缀，用 DPAPI（当前用户）解密得到 AES-256 密钥
+2. `tokenCache` base64 解码后按 `3 字节版本 + 12 字节 nonce + 密文 + 16 字节 GCM tag` 布局，AES-256-GCM 解密得到明文 JSON
+
+明文结构是 `"账号ID:组织ID:https://api.anthropic.com:<scopes>" -> { token, refreshToken, expiresAt, ... }` 的字典。选取规则：优先 key 含 `claude_code` 的条目（`/api/oauth/usage` 是 Claude Code 端点），同档取 `expiresAt` 最晚的。读取字段 `token` 和 `expiresAt`（unix 毫秒）。
+
+**限制**：Desktop 来源没有刷新路径（不调 CLI）。token 由 Claude Desktop 自己在运行时轮换，程序只负责读取最新缓存；若 token 过期且 Desktop 未运行，则取不到数据。若以后加密升级到 `v20`（app-bound）则 DPAPI 无法解密。
 
 ## 调用流程
 

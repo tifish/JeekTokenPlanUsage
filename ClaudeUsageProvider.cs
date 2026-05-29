@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using JeekTokenPlanUsage.Resources;
@@ -48,11 +49,21 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private static readonly string CredentialsPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
 
-    public static bool HasLocalCredentials() => File.Exists(CredentialsPath) || ListWslDistros().Any(ReadWslCredentialsExists);
+    // Claude Desktop stores its OAuth token (encrypted with Chromium OSCrypt) in
+    // config.json, with the AES key kept DPAPI-protected in the sibling "Local State".
+    private static readonly string DesktopConfigPath =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Claude", "config.json");
+
+    public static bool HasLocalCredentials() =>
+        File.Exists(CredentialsPath) || File.Exists(DesktopConfigPath) || ListWslDistros().Any(ReadWslCredentialsExists);
 
     public static string CredentialWatchSignature()
     {
-        var parts = new List<string> { WindowsCredentialWatchSignature(CredentialsPath) };
+        var parts = new List<string>
+        {
+            WindowsCredentialWatchSignature(CredentialsPath),
+            DesktopCredentialWatchSignature(DesktopConfigPath),
+        };
         foreach (string distro in ListWslDistros())
             parts.Add(WslCredentialWatchSignature(distro));
 
@@ -239,6 +250,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private static string SourceLabel(CredentialSource source) => source switch
     {
         WindowsCredentialSource => "Windows",
+        DesktopCredentialSource => "Desktop",
         WslCredentialSource wsl => $"WSL:{wsl.Distro}",
         _ => "unknown",
     };
@@ -248,6 +260,9 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         if (File.Exists(CredentialsPath))
             yield return new WindowsCredentialSource(CredentialsPath);
 
+        if (File.Exists(DesktopConfigPath))
+            yield return new DesktopCredentialSource(DesktopConfigPath);
+
         foreach (string distro in ListWslDistros())
             yield return new WslCredentialSource(distro);
     }
@@ -255,6 +270,13 @@ public sealed class ClaudeUsageProvider : IUsageProvider
     private static ClaudeCredential? ReadCredential(CredentialSource source, out string? error)
     {
         error = null;
+        // Desktop stores an encrypted token in a different shape, so it parses separately.
+        if (source is DesktopCredentialSource desktop)
+        {
+            string? plain = ReadDesktopCredentialJson(desktop.ConfigPath, out error);
+            return plain is null ? null : ParseDesktopCredential(plain, source, out error);
+        }
+
         string? json = source switch
         {
             WindowsCredentialSource windows => ReadWindowsCredentialJson(windows.Path, out error),
@@ -347,6 +369,160 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         return null;
     }
 
+    // Reads config.json, pulls oauth:tokenCache, and decrypts it with the OSCrypt key.
+    private static string? ReadDesktopCredentialJson(string configPath, out string? error)
+    {
+        error = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
+            if (!doc.RootElement.TryGetProperty("oauth:tokenCache", out JsonElement tc)
+                || tc.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(tc.GetString()))
+            {
+                DiagnosticLog.Warn("Claude Desktop config has no oauth:tokenCache");
+                error = Strings.Claude_CredNotFound;
+                return null;
+            }
+
+            byte[]? key = LoadOsCryptKey(configPath, out error);
+            if (key is null)
+                return null;
+
+            return DecryptOsCrypt(tc.GetString()!, key, out error);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Error($"Claude Desktop credential read failed: {ex.Message}");
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            return null;
+        }
+    }
+
+    // Loads the AES-256 key from the sibling "Local State": base64 -> strip "DPAPI" -> DPAPI unprotect.
+    private static byte[]? LoadOsCryptKey(string configPath, out string? error)
+    {
+        error = null;
+        string localStatePath = Path.Combine(Path.GetDirectoryName(configPath)!, "Local State");
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(localStatePath));
+            if (!doc.RootElement.TryGetProperty("os_crypt", out JsonElement osc)
+                || !osc.TryGetProperty("encrypted_key", out JsonElement ek)
+                || ek.ValueKind != JsonValueKind.String)
+            {
+                DiagnosticLog.Warn("Claude Desktop Local State missing os_crypt.encrypted_key");
+                error = Strings.Claude_CredNotFound;
+                return null;
+            }
+
+            byte[] raw = Convert.FromBase64String(ek.GetString()!);
+            ReadOnlySpan<byte> dpapiPrefix = "DPAPI"u8;
+            byte[] protectedKey = raw.AsSpan().StartsWith(dpapiPrefix) ? raw[dpapiPrefix.Length..] : raw;
+            return ProtectedData.Unprotect(protectedKey, null, DataProtectionScope.CurrentUser);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Error($"Claude Desktop OSCrypt key load failed: {ex.Message}");
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            return null;
+        }
+    }
+
+    // Chromium OSCrypt v10/v11 layout: 3-byte version prefix + 12-byte nonce + ciphertext + 16-byte GCM tag.
+    private static string? DecryptOsCrypt(string base64, byte[] key, out string? error)
+    {
+        error = null;
+        try
+        {
+            byte[] data = Convert.FromBase64String(base64);
+            const int prefixLen = 3, nonceLen = 12, tagLen = 16;
+            if (data.Length < prefixLen + nonceLen + tagLen)
+            {
+                error = Strings.Claude_CredMissingToken;
+                return null;
+            }
+
+            ReadOnlySpan<byte> span = data;
+            ReadOnlySpan<byte> nonce = span.Slice(prefixLen, nonceLen);
+            ReadOnlySpan<byte> tag = span[^tagLen..];
+            ReadOnlySpan<byte> cipher = span[(prefixLen + nonceLen)..^tagLen];
+
+            byte[] plain = new byte[cipher.Length];
+            using var aes = new AesGcm(key, tagLen);
+            aes.Decrypt(nonce, cipher, tag, plain);
+            return Encoding.UTF8.GetString(plain);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Error($"Claude Desktop OSCrypt decrypt failed: {ex.Message}");
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            return null;
+        }
+    }
+
+    // Desktop's tokenCache maps "accountId:orgId:audience:scopes" -> { token, refreshToken, expiresAt, ... }.
+    // Prefer the Claude Code-scoped entry (the OAuth usage endpoint is Claude Code's); within a tier the
+    // latest expiry (most recently refreshed) wins.
+    private static ClaudeCredential? ParseDesktopCredential(string json, CredentialSource source, out string? error)
+    {
+        error = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                error = Strings.Claude_CredMissingToken;
+                return null;
+            }
+
+            JsonElement best = default;
+            bool found = false;
+            long bestExpiry = long.MinValue;
+            bool bestIsClaudeCode = false;
+
+            foreach (JsonProperty entry in doc.RootElement.EnumerateObject())
+            {
+                if (entry.Value.ValueKind != JsonValueKind.Object
+                    || !entry.Value.TryGetProperty("token", out JsonElement tok)
+                    || tok.ValueKind != JsonValueKind.String
+                    || string.IsNullOrWhiteSpace(tok.GetString()))
+                    continue;
+
+                bool isClaudeCode = entry.Name.Contains("claude_code", StringComparison.OrdinalIgnoreCase);
+                long expiry = entry.Value.TryGetProperty("expiresAt", out JsonElement e) ? ReadInt64(e) ?? 0 : 0;
+
+                bool better = !found
+                    || (isClaudeCode && !bestIsClaudeCode)
+                    || (isClaudeCode == bestIsClaudeCode && expiry > bestExpiry);
+                if (better)
+                {
+                    best = entry.Value;
+                    bestExpiry = expiry;
+                    bestIsClaudeCode = isClaudeCode;
+                    found = true;
+                }
+            }
+
+            if (!found)
+            {
+                DiagnosticLog.Warn("Claude Desktop tokenCache has no usable token entry");
+                error = Strings.Claude_CredMissingToken;
+                return null;
+            }
+
+            string token = best.GetProperty("token").GetString()!;
+            long? expiresAt = best.TryGetProperty("expiresAt", out JsonElement exp) ? ReadInt64(exp) : null;
+            return new ClaudeCredential(token, expiresAt, source);
+        }
+        catch (Exception ex) when (ex is JsonException or FormatException or OverflowException)
+        {
+            DiagnosticLog.Error($"Claude Desktop credential parse failed: {ex.Message}");
+            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            return null;
+        }
+    }
+
     private static bool IsExpired(ClaudeCredential credential)
     {
         if (credential.ExpiresAtUnixMs is null)
@@ -365,6 +541,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 break;
             case WslCredentialSource wsl:
                 RefreshWslToken(wsl.Distro);
+                break;
+            case DesktopCredentialSource:
+                // No CLI to drive; Claude Desktop refreshes its own token while running.
+                DiagnosticLog.Info("Claude Desktop has no refresh path; relying on the app's own token rotation");
                 break;
         }
     }
@@ -485,6 +665,22 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         catch
         {
             return $"win:{path}|unavailable";
+        }
+    }
+
+    private static string DesktopCredentialWatchSignature(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+                return $"desktop:{path}|missing";
+
+            return $"desktop:{path}|present|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch
+        {
+            return $"desktop:{path}|unavailable";
         }
     }
 
@@ -920,6 +1116,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
     private abstract record CredentialSource;
     private sealed record WindowsCredentialSource(string Path) : CredentialSource;
+    private sealed record DesktopCredentialSource(string ConfigPath) : CredentialSource;
     private sealed record WslCredentialSource(string Distro) : CredentialSource;
     private sealed record ClaudeCredential(string AccessToken, long? ExpiresAtUnixMs, CredentialSource Source);
     private readonly record struct CredentialResolution(ClaudeCredential? Credential, string? Error);
