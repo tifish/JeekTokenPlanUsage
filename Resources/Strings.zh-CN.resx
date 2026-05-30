@@ -63,8 +63,20 @@
   <data name="Menu_AutoUpdate" xml:space="preserve">
     <value>自动更新</value>
   </data>
+  <data name="Menu_About" xml:space="preserve">
+    <value>关于</value>
+  </data>
   <data name="Menu_Exit" xml:space="preserve">
     <value>退出</value>
+  </data>
+  <data name="About_VersionFormat" xml:space="preserve">
+    <value>构建 {0}</value>
+  </data>
+  <data name="About_DevBuild" xml:space="preserve">
+    <value>开发版本</value>
+  </data>
+  <data name="About_ProjectLink" xml:space="preserve">
+    <value>项目主页</value>
   </data>
   <data name="Update_FoundTitle" xml:space="preserve">
     <value>发现新版本</value>

@@ -104,6 +104,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _openLogItem = null!;
     private ToolStripMenuItem _checkUpdateItem = null!;
     private ToolStripMenuItem _autoUpdateItem = null!;
+    private ToolStripMenuItem _aboutItem = null!;
     private ToolStripMenuItem _exitItem = null!;
 
     private readonly WinTimer _updateTimer;
@@ -317,6 +318,12 @@ public sealed class TrayApplicationContext : ApplicationContext
                 await CheckForUpdatesAsync(manual: false);
         };
         initialDelayTimer.Start();
+    }
+
+    private static void ShowAbout()
+    {
+        using var about = new AboutForm();
+        about.ShowDialog();
     }
 
     private static void OpenLogFile()
@@ -568,6 +575,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         _checkUpdateItem = new ToolStripMenuItem(Strings.Menu_CheckForUpdates);
         _checkUpdateItem.Click += async (_, _) => await CheckForUpdatesAsync(manual: true);
 
+        _aboutItem = new ToolStripMenuItem(Strings.Menu_About);
+        _aboutItem.Click += (_, _) => ShowAbout();
+
         _exitItem = new ToolStripMenuItem(Strings.Menu_Exit);
         _exitItem.Click += (_, _) => ExitThread();
 
@@ -587,6 +597,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_checkUpdateItem);
         menu.Items.Add(_openLogItem);
+        menu.Items.Add(_aboutItem);
         menu.Items.Add(_exitItem);
 
         return menu;

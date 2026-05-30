@@ -38,6 +38,12 @@ public static class AutoUpdate
     public const string VersionTxtUrl =
         "https://github.com/tifish/JeekTokenPlanUsage/releases/download/latest_release/version.txt";
 
+    public const string RepoUrl = "https://github.com/tifish/JeekTokenPlanUsage";
+
+    /// The local build identity (git commit count baked into AssemblyVersion.Major).
+    /// 0 for a local dev build that didn't pass through CI. Shown in the About box.
+    public static int LocalBuild => ReadLocalCommitCount();
+
     private const string UpdateScriptName = "AutoUpdate.ps1";
 
     public static string DownloadUrl { get; private set; } = "";

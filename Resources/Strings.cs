@@ -31,7 +31,12 @@ internal static class Strings
     public static string Menu_OpenLog => Get(nameof(Menu_OpenLog));
     public static string Menu_CheckForUpdates => Get(nameof(Menu_CheckForUpdates));
     public static string Menu_AutoUpdate => Get(nameof(Menu_AutoUpdate));
+    public static string Menu_About => Get(nameof(Menu_About));
     public static string Menu_Exit => Get(nameof(Menu_Exit));
+
+    public static string About_VersionFormat => Get(nameof(About_VersionFormat));
+    public static string About_DevBuild => Get(nameof(About_DevBuild));
+    public static string About_ProjectLink => Get(nameof(About_ProjectLink));
 
     public static string Update_FoundTitle => Get(nameof(Update_FoundTitle));
     public static string Update_FoundBodyFormat => Get(nameof(Update_FoundBodyFormat));

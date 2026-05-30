@@ -63,8 +63,20 @@
   <data name="Menu_AutoUpdate" xml:space="preserve">
     <value>Auto-update</value>
   </data>
+  <data name="Menu_About" xml:space="preserve">
+    <value>About</value>
+  </data>
   <data name="Menu_Exit" xml:space="preserve">
     <value>Exit</value>
+  </data>
+  <data name="About_VersionFormat" xml:space="preserve">
+    <value>Build {0}</value>
+  </data>
+  <data name="About_DevBuild" xml:space="preserve">
+    <value>Development build</value>
+  </data>
+  <data name="About_ProjectLink" xml:space="preserve">
+    <value>Project home page</value>
   </data>
   <data name="Update_FoundTitle" xml:space="preserve">
     <value>Update available</value>
