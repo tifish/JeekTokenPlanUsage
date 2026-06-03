@@ -69,6 +69,36 @@
   <data name="Menu_Exit" xml:space="preserve">
     <value>Exit</value>
   </data>
+  <data name="Menu_Proxy" xml:space="preserve">
+    <value>Proxy</value>
+  </data>
+  <data name="Menu_ProxySystem" xml:space="preserve">
+    <value>System proxy</value>
+  </data>
+  <data name="Menu_ProxyDirect" xml:space="preserve">
+    <value>Direct connection</value>
+  </data>
+  <data name="Menu_ProxyCustom" xml:space="preserve">
+    <value>Custom proxy</value>
+  </data>
+  <data name="Menu_ProxyCustomSettings" xml:space="preserve">
+    <value>Custom proxy settings…</value>
+  </data>
+  <data name="Proxy_DialogTitle" xml:space="preserve">
+    <value>Custom proxy</value>
+  </data>
+  <data name="Proxy_Protocol" xml:space="preserve">
+    <value>Protocol:</value>
+  </data>
+  <data name="Proxy_Host" xml:space="preserve">
+    <value>Host:</value>
+  </data>
+  <data name="Proxy_Port" xml:space="preserve">
+    <value>Port:</value>
+  </data>
+  <data name="Proxy_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
   <data name="About_VersionFormat" xml:space="preserve">
     <value>Build {0}</value>
   </data>

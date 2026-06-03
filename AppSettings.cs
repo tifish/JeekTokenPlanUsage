@@ -16,6 +16,17 @@ public enum IconDisplayMode
     Double = 2,
 }
 
+/// How outbound HTTP traffic is routed.
+///   System — follow the Windows system proxy (HttpClient.DefaultProxy); default.
+///   Direct — ignore any proxy and connect straight out.
+///   Custom — use the host/port/protocol configured below.
+public enum ProxyMode
+{
+    System = 0,
+    Direct = 1,
+    Custom = 2,
+}
+
 internal sealed class AppSettings
 {
     private static readonly string SettingsPath = Path.Combine(
@@ -74,6 +85,40 @@ internal sealed class AppSettings
     /// Useful for users outside China where the mirrors are slower or
     /// occasionally unhealthy.
     public bool DisableMirrorDownload { get; set; } = false;
+
+    /// How outbound HTTP requests are routed. Defaults to following the Windows
+    /// system proxy so behavior matches a browser out of the box. See AppProxy,
+    /// which reads these fields live so a tray-menu change applies immediately.
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public ProxyMode ProxyMode { get; set; } = ProxyMode.System;
+
+    /// Custom-proxy protocol. "socks5" (default) or "http" (also covers the
+    /// https CONNECT proxy). Only consulted when ProxyMode == Custom.
+    public string ProxyProtocol { get; set; } = "socks5";
+
+    /// Custom-proxy host. Defaults to localhost, the common case for a local
+    /// Clash/V2Ray-style proxy. Only consulted when ProxyMode == Custom.
+    public string ProxyHost { get; set; } = "127.0.0.1";
+
+    /// Custom-proxy port. Only consulted when ProxyMode == Custom.
+    public int ProxyPort { get; set; } = 7890;
+
+    /// Build the proxy URI from the custom fields, or null when they don't form
+    /// a usable proxy (empty host / out-of-range port) so the caller falls back
+    /// to a direct connection rather than throwing.
+    public Uri? BuildCustomProxyUri()
+    {
+        if (string.IsNullOrWhiteSpace(ProxyHost) || ProxyPort is <= 0 or > 65535)
+            return null;
+        string scheme = ProxyProtocol?.Trim().ToLowerInvariant() switch
+        {
+            "socks5" or "socks" => "socks5",
+            _ => "http",
+        };
+        return Uri.TryCreate($"{scheme}://{ProxyHost.Trim()}:{ProxyPort}", UriKind.Absolute, out Uri? uri)
+            ? uri
+            : null;
+    }
 
     [JsonIgnore]
     public bool RunAtStartup

@@ -69,6 +69,36 @@
   <data name="Menu_Exit" xml:space="preserve">
     <value>退出</value>
   </data>
+  <data name="Menu_Proxy" xml:space="preserve">
+    <value>代理</value>
+  </data>
+  <data name="Menu_ProxySystem" xml:space="preserve">
+    <value>系统代理</value>
+  </data>
+  <data name="Menu_ProxyDirect" xml:space="preserve">
+    <value>直连</value>
+  </data>
+  <data name="Menu_ProxyCustom" xml:space="preserve">
+    <value>自定义代理</value>
+  </data>
+  <data name="Menu_ProxyCustomSettings" xml:space="preserve">
+    <value>自定义代理设置…</value>
+  </data>
+  <data name="Proxy_DialogTitle" xml:space="preserve">
+    <value>自定义代理</value>
+  </data>
+  <data name="Proxy_Protocol" xml:space="preserve">
+    <value>协议：</value>
+  </data>
+  <data name="Proxy_Host" xml:space="preserve">
+    <value>地址：</value>
+  </data>
+  <data name="Proxy_Port" xml:space="preserve">
+    <value>端口：</value>
+  </data>
+  <data name="Proxy_Cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
   <data name="About_VersionFormat" xml:space="preserve">
     <value>构建 {0}</value>
   </data>

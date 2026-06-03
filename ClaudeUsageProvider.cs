@@ -78,7 +78,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
     public ClaudeUsageProvider()
     {
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        _http = new HttpClient(AppProxy.CreateHandler()) { Timeout = TimeSpan.FromSeconds(20) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("JeekTokenPlanUsage/1.0");
     }
 

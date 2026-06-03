@@ -34,6 +34,18 @@ internal static class Strings
     public static string Menu_About => Get(nameof(Menu_About));
     public static string Menu_Exit => Get(nameof(Menu_Exit));
 
+    public static string Menu_Proxy => Get(nameof(Menu_Proxy));
+    public static string Menu_ProxySystem => Get(nameof(Menu_ProxySystem));
+    public static string Menu_ProxyDirect => Get(nameof(Menu_ProxyDirect));
+    public static string Menu_ProxyCustom => Get(nameof(Menu_ProxyCustom));
+    public static string Menu_ProxyCustomSettings => Get(nameof(Menu_ProxyCustomSettings));
+
+    public static string Proxy_DialogTitle => Get(nameof(Proxy_DialogTitle));
+    public static string Proxy_Protocol => Get(nameof(Proxy_Protocol));
+    public static string Proxy_Host => Get(nameof(Proxy_Host));
+    public static string Proxy_Port => Get(nameof(Proxy_Port));
+    public static string Proxy_Cancel => Get(nameof(Proxy_Cancel));
+
     public static string About_VersionFormat => Get(nameof(About_VersionFormat));
     public static string About_DevBuild => Get(nameof(About_DevBuild));
     public static string About_ProjectLink => Get(nameof(About_ProjectLink));

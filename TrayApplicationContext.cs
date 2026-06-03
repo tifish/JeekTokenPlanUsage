@@ -104,6 +104,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _openLogItem = null!;
     private ToolStripMenuItem _checkUpdateItem = null!;
     private ToolStripMenuItem _autoUpdateItem = null!;
+    private ToolStripMenuItem _proxyParent = null!;
+    private ToolStripMenuItem _proxyCustomSettingsItem = null!;
     private ToolStripMenuItem _aboutItem = null!;
     private ToolStripMenuItem _exitItem = null!;
 
@@ -115,6 +117,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _settings = AppSettings.Load();
+        AppProxy.Configure(_settings);
         _baseIntervalMs = ClampPollMinutes(_settings.PollMinutes) * 60_000;
 
         ContextMenuStrip menu = BuildMenu();
@@ -199,6 +202,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         WireIconDisplayMenu();
         WireIntervalMenu();
         WireLanguageMenu();
+        WireProxyMenu();
         ApplyTimers();
 
         if (_settings.ShowClaude)
@@ -489,6 +493,53 @@ public sealed class TrayApplicationContext : ApplicationContext
         _ = RefreshAllAsync();
     }
 
+    private void WireProxyMenu()
+    {
+        foreach (ToolStripItem raw in _proxyParent.DropDownItems)
+        {
+            if (raw is not ToolStripMenuItem item || item.Tag is not ProxyMode mode)
+                continue;
+            item.Checked = (mode == _settings.ProxyMode);
+            item.Click += async (_, _) =>
+            {
+                _settings.ProxyMode = mode;
+                _settings.Save();
+                foreach (ToolStripItem sibling in _proxyParent.DropDownItems)
+                    if (sibling is ToolStripMenuItem mi && mi.Tag is ProxyMode)
+                        mi.Checked = ReferenceEquals(mi, item);
+                // The next request reads the new mode through AppProxy, but poke
+                // a refresh so the change is visible without waiting for a tick.
+                await RefreshAllAsync(forceClaude: true, forceCodex: true);
+            };
+        }
+
+        _proxyCustomSettingsItem.Click += async (_, _) =>
+        {
+            using var dialog = new ProxyForm(
+                _settings.ProxyProtocol, _settings.ProxyHost, _settings.ProxyPort);
+            if (dialog.ShowDialog() != DialogResult.OK)
+                return;
+            _settings.ProxyProtocol = dialog.Protocol;
+            _settings.ProxyHost = dialog.Host;
+            _settings.ProxyPort = dialog.Port;
+            // Editing the custom fields implies the user wants custom routing.
+            _settings.ProxyMode = ProxyMode.Custom;
+            _settings.Save();
+            foreach (ToolStripItem sibling in _proxyParent.DropDownItems)
+                if (sibling is ToolStripMenuItem mi && mi.Tag is ProxyMode m)
+                    mi.Checked = (m == ProxyMode.Custom);
+            await RefreshAllAsync(forceClaude: true, forceCodex: true);
+        };
+    }
+
+    private static string ProxyModeLabel(ProxyMode mode) => mode switch
+    {
+        ProxyMode.System => Strings.Menu_ProxySystem,
+        ProxyMode.Direct => Strings.Menu_ProxyDirect,
+        ProxyMode.Custom => Strings.Menu_ProxyCustom,
+        _ => mode.ToString(),
+    };
+
     private void RelocalizeMenu()
     {
         _refreshItem.Text = Strings.Menu_RefreshNow;
@@ -502,6 +553,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         _languageAutoItem.Text = Strings.Menu_LanguageAuto;
         _notifyItem.Text = Strings.Menu_EnableNotifications;
         _widgetItem.Text = Strings.Menu_ShowTaskbarWidget;
+        _proxyParent.Text = Strings.Menu_Proxy;
+        _proxyCustomSettingsItem.Text = Strings.Menu_ProxyCustomSettings;
+        foreach (ToolStripItem raw in _proxyParent.DropDownItems)
+            if (raw is ToolStripMenuItem mi && mi.Tag is ProxyMode mode)
+                mi.Text = ProxyModeLabel(mode);
         _openLogItem.Text = Strings.Menu_OpenLog;
         _checkUpdateItem.Text = Strings.Menu_CheckForUpdates;
         _autoUpdateItem.Text = Strings.Menu_AutoUpdate;
@@ -569,6 +625,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         _widgetItem = new ToolStripMenuItem(Strings.Menu_ShowTaskbarWidget);
         _autoUpdateItem = new ToolStripMenuItem(Strings.Menu_AutoUpdate);
 
+        // Proxy mode radios + a dialog for the custom host/port/protocol. The
+        // mode items carry their ProxyMode in Tag, mirroring the interval menu.
+        _proxyParent = new ToolStripMenuItem(Strings.Menu_Proxy);
+        foreach (ProxyMode mode in new[] { ProxyMode.Direct, ProxyMode.System, ProxyMode.Custom })
+            _proxyParent.DropDownItems.Add(
+                new ToolStripMenuItem(ProxyModeLabel(mode)) { Tag = mode }
+            );
+        _proxyParent.DropDownItems.Add(new ToolStripSeparator());
+        _proxyCustomSettingsItem = new ToolStripMenuItem(Strings.Menu_ProxyCustomSettings);
+        _proxyParent.DropDownItems.Add(_proxyCustomSettingsItem);
+
         _openLogItem = new ToolStripMenuItem(Strings.Menu_OpenLog);
         _openLogItem.Click += (_, _) => OpenLogFile();
 
@@ -594,6 +661,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_iconDisplayParent);
         menu.Items.Add(_intervalParent);
         menu.Items.Add(_languageItem);
+        menu.Items.Add(_proxyParent);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_checkUpdateItem);
         menu.Items.Add(_openLogItem);

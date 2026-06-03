@@ -31,7 +31,7 @@ public sealed class CursorUsageProvider : IUsageProvider
 
     public CursorUsageProvider()
     {
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        _http = new HttpClient(AppProxy.CreateHandler()) { Timeout = TimeSpan.FromSeconds(20) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     }

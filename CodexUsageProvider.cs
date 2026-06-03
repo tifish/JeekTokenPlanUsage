@@ -94,6 +94,15 @@ public sealed class CodexUsageProvider : IUsageProvider
         if (!string.IsNullOrEmpty(account))
             sb.AppendLine($"header = \"ChatGPT-Account-Id: {account}\"");
         sb.AppendLine("user-agent = \"codex-cli\"");
+        // Route curl through the same proxy the HttpClient paths use. curl does
+        // not read the Windows system proxy on its own, so we pass the resolved
+        // URI explicitly; null means a direct connection, and noproxy="*" also
+        // neutralizes any inherited http_proxy/https_proxy environment vars.
+        Uri? proxy = AppProxy.ResolveProxy(new Uri(UsageUrl));
+        if (proxy is not null)
+            sb.AppendLine($"proxy = \"{proxy.AbsoluteUri}\"");
+        else
+            sb.AppendLine("noproxy = \"*\"");
         sb.AppendLine("max-time = 20");
         sb.AppendLine("silent");
         sb.AppendLine("show-error");
