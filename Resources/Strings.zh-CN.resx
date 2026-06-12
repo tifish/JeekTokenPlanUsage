@@ -201,6 +201,9 @@
   <data name="Codex_TokenInvalid" xml:space="preserve">
     <value>Token 失效 (401)，请重新登录 Codex</value>
   </data>
+  <data name="Codex_ReadAuthFailedFormat" xml:space="preserve">
+    <value>读取 Codex 凭据失败：{0}</value>
+  </data>
   <data name="Codex_AuthRequiredTitle" xml:space="preserve">
     <value>需要重新登录 Codex</value>
   </data>

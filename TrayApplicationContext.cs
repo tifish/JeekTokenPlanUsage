@@ -23,16 +23,17 @@ public sealed class TrayApplicationContext : ApplicationContext
     private static readonly TimeSpan ClaudeActivePollInterval = TimeSpan.FromMinutes(2);
     private const int ClaudeActivePollFollowUps = 2;
 
-    // Timer-driven Claude polls pause while the user is away; manual refresh
-    // still bypasses this so the menu stays responsive.
-    private static readonly TimeSpan ClaudeIdlePause = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan ClaudeIdleCheckInterval = TimeSpan.FromSeconds(30);
+    // Timer-driven Claude/Codex polls pause while the user is away; manual
+    // refresh still bypasses this so the menu stays responsive.
+    private static readonly TimeSpan IdlePause = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan IdleCheckInterval = TimeSpan.FromSeconds(30);
 
     // Poll just after an upcoming reset instead of waiting a full base interval.
     private static readonly TimeSpan ClaudeResetPollBuffer = TimeSpan.FromSeconds(5);
 
-    // Cap on Claude's exponential backoff during sustained errors.
-    private static readonly TimeSpan ClaudeMaxBackoff = TimeSpan.FromHours(1);
+    // Cap on exponential backoff during sustained errors. Shared by Claude and
+    // Codex so a flapping network/API can't push the next attempt out forever.
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromHours(1);
 
     private readonly ClaudeUsageProvider _claude = new();
     private readonly CodexUsageProvider _codex = new();
@@ -83,6 +84,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private bool _codexBusy;
     private bool _codexAuthPaused;
     private bool _codexAuthNotified;
+    private bool _codexIdlePaused;
+    private int _codexRetryCount;
     private bool _cursorBusy;
     private bool _disposed;
 
@@ -453,6 +456,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _baseIntervalMs = minutes * 60_000;
                 _claudeRetryCount = 0;
                 _claudeFastPollsRemaining = 0;
+                _codexRetryCount = 0;
                 _claudeTimer.Interval = _baseIntervalMs;
                 _codexTimer.Interval = _baseIntervalMs;
                 _cursorTimer.Interval = _baseIntervalMs;
@@ -690,7 +694,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _claudeBusy = true;
         try
         {
-            if (!force && UserActivity.IsAway(ClaudeIdlePause))
+            if (!force && UserActivity.IsAway(IdlePause))
             {
                 if (!_claudeIdlePaused)
                 {
@@ -698,7 +702,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                     DiagnosticLog.Info("Claude polling paused while user is idle or workstation is locked");
                 }
 
-                _claudeTimer.Interval = ToTimerInterval(ClaudeIdleCheckInterval);
+                _claudeTimer.Interval = ToTimerInterval(IdleCheckInterval);
                 return;
             }
 
@@ -761,7 +765,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             // 2^(retry-1), capped to avoid shifting past int width.
             int shift = Math.Min(_claudeRetryCount - 1, 16);
             long ms = (long)_baseIntervalMs * (1L << shift);
-            long cap = (long)ClaudeMaxBackoff.TotalMilliseconds;
+            long cap = (long)MaxBackoff.TotalMilliseconds;
             return (int)Math.Min(ms, cap);
         }
 
@@ -855,11 +859,32 @@ public sealed class TrayApplicationContext : ApplicationContext
         _codexBusy = true;
         try
         {
+            if (!force && UserActivity.IsAway(IdlePause))
+            {
+                if (!_codexIdlePaused)
+                {
+                    _codexIdlePaused = true;
+                    DiagnosticLog.Info("Codex polling paused while user is idle or workstation is locked");
+                }
+
+                _codexTimer.Interval = ToTimerInterval(IdleCheckInterval);
+                return;
+            }
+
+            if (_codexIdlePaused)
+            {
+                _codexIdlePaused = false;
+                DiagnosticLog.Info("Codex polling resumed after user activity");
+            }
+
             if (_codexAuthPaused && !force)
             {
                 string signature = await Task.Run(CodexUsageProvider.CredentialWatchSignature);
                 if (signature == _codexAuthCredentialSignature)
+                {
+                    _codexTimer.Interval = _baseIntervalMs;
                     return;
+                }
 
                 DiagnosticLog.Info("Codex credential signature changed; resuming auth polling");
                 _codexAuthPaused = false;
@@ -875,19 +900,41 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (snap.ErrorKind == UsageErrorKind.Auth)
             {
                 _codexAuthPaused = true;
+                _codexRetryCount = 0;
                 _codexAuthCredentialSignature = await Task.Run(CodexUsageProvider.CredentialWatchSignature);
+                _codexTimer.Interval = _baseIntervalMs;
                 DiagnosticLog.Warn("Codex auth polling paused until credentials change");
                 NotifyCodexAuthErrorOnce();
             }
             else
             {
                 ResetCodexAuthState();
+                _codexTimer.Interval = NextCodexIntervalMs(snap);
             }
         }
         finally
         {
             _codexBusy = false;
         }
+    }
+
+    // Codex doesn't expose reset times the way Claude does, so the only signal
+    // we adapt on is success/failure: back off geometrically while errors persist
+    // (curl DNS / TLS / Cloudflare hiccups) so the log isn't flooded, and snap
+    // back to the user-chosen interval the moment a poll succeeds.
+    private int NextCodexIntervalMs(UsageSnapshot snap)
+    {
+        if (snap.Error is not null)
+        {
+            _codexRetryCount++;
+            int shift = Math.Min(_codexRetryCount - 1, 16);
+            long ms = (long)_baseIntervalMs * (1L << shift);
+            long cap = (long)MaxBackoff.TotalMilliseconds;
+            return (int)Math.Min(ms, cap);
+        }
+
+        _codexRetryCount = 0;
+        return _baseIntervalMs;
     }
 
     private void NotifyCodexAuthErrorOnce()
@@ -1030,9 +1077,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         _detailsForm.ShowAt(Cursor.Position, entries);
         // Refresh in the background so the popup reflects current state without
         // forcing the user to wait. RefreshDetailsIfVisible() will repaint rows
-        // as each provider completes.
-        _ = RefreshAllAsync();
+        // as each provider completes. When the user opens the popup with stale
+        // or missing data on a provider (no snapshot yet, or the last poll
+        // errored), force-refresh that provider so the click bypasses the idle
+        // and auth-paused gates — the user explicitly asked for fresh data.
+        bool forceClaude = _settings.ShowClaude && IsSnapshotMissing(_claudeSnap);
+        bool forceCodex = _settings.ShowCodex && IsSnapshotMissing(_codexSnap);
+        _ = RefreshAllAsync(forceClaude, forceCodex);
     }
+
+    private static bool IsSnapshotMissing(UsageSnapshot? snap) =>
+        snap is null || snap.Error is not null;
 
     private void RefreshDetailsIfVisible()
     {

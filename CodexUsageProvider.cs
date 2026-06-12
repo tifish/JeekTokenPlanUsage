@@ -235,7 +235,7 @@ public sealed class CodexUsageProvider : IUsageProvider
         catch (Exception ex)
         {
             DiagnosticLog.Error($"Codex auth read failed: {ex.Message}");
-            error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
+            error = string.Format(Strings.Codex_ReadAuthFailedFormat, ex.Message);
             return null;
         }
     }

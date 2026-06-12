@@ -201,6 +201,9 @@
   <data name="Codex_TokenInvalid" xml:space="preserve">
     <value>Token invalid (401). Please re-login Codex.</value>
   </data>
+  <data name="Codex_ReadAuthFailedFormat" xml:space="preserve">
+    <value>Failed to read Codex auth: {0}</value>
+  </data>
   <data name="Codex_AuthRequiredTitle" xml:space="preserve">
     <value>Codex login required</value>
   </data>
