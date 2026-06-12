@@ -165,6 +165,9 @@
   <data name="Claude_TokenInvalid" xml:space="preserve">
     <value>Token 失效 (401)，请在 Claude Code 中重新登录</value>
   </data>
+  <data name="Claude_TokenInvalidFormat" xml:space="preserve">
+    <value>Token 失效 (401)，请在 {0} 中重新登录</value>
+  </data>
   <data name="Claude_AuthRequiredTitle" xml:space="preserve">
     <value>需要重新登录 Claude</value>
   </data>

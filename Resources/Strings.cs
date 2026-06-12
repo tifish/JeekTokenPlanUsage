@@ -74,6 +74,7 @@ internal static class Strings
 
     public static string Claude_ReadCredFailed => Get(nameof(Claude_ReadCredFailed));
     public static string Claude_TokenInvalid => Get(nameof(Claude_TokenInvalid));
+    public static string Claude_TokenInvalidFormat => Get(nameof(Claude_TokenInvalidFormat));
     public static string Claude_AuthRequiredTitle => Get(nameof(Claude_AuthRequiredTitle));
     public static string Claude_AuthRequiredBody => Get(nameof(Claude_AuthRequiredBody));
     public static string Claude_CredNotFound => Get(nameof(Claude_CredNotFound));

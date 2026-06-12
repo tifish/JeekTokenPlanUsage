@@ -95,6 +95,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             return UsageSnapshot.FromError(resolved.Error ?? Strings.Claude_ReadCredFailed, UsageErrorKind.Auth);
         }
 
+        DiagnosticLog.Info($"Claude resolved credential from {SourceLabel(resolved.Credential.Source)}");
         ProviderResult result = await FetchUsageWithFallbackAsync(resolved.Credential.AccessToken, ct);
         if (result.AuthFailed)
         {
@@ -110,9 +111,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             if (retryCred.Credential is null)
             {
                 DiagnosticLog.Warn("Claude auth retry skipped: refreshed credential unavailable or unchanged");
-                return UsageSnapshot.FromError(Strings.Claude_TokenInvalid, UsageErrorKind.Auth);
+                return UsageSnapshot.FromError(retryCred.Error ?? Strings.Claude_TokenInvalid, UsageErrorKind.Auth);
             }
 
+            DiagnosticLog.Info($"Claude resolved credential from {SourceLabel(retryCred.Credential.Source)} after refresh");
             result = await FetchUsageWithFallbackAsync(retryCred.Credential.AccessToken, ct);
         }
 
@@ -190,14 +192,24 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         CredentialSource? skipRefreshFor,
         ClaudeCredential? rejected)
     {
-        // GetCredentialSources() yields Windows first, then WSL — iterating lazily
-        // (no ToList) means WSL enumeration only runs as a fallback when Windows
-        // credentials are absent or unusable.
-        string? lastError = null;
-        bool anySource = false;
-        foreach (CredentialSource source in GetCredentialSources())
+        // Snapshot the sources once (Windows, Desktop, then any running WSL) so
+        // both passes and the failure message see the same set without re-running
+        // WSL enumeration. Empty means nothing is installed/logged in anywhere.
+        List<CredentialSource> sources = GetCredentialSources().ToList();
+        if (sources.Count == 0)
         {
-            anySource = true;
+            DiagnosticLog.Warn("Claude credential resolution found no Windows credentials or running WSL sources");
+            return new(null, Strings.Claude_CredNotFound);
+        }
+
+        string? lastError = null;
+
+        // Pass 1: take any immediately-usable credential before spending time on a
+        // blocking CLI refresh. A valid Claude Desktop token must win instantly
+        // even when an expired Claude Code credential sits ahead of it — otherwise
+        // every poll wastes ~30s on a doomed `claude -p .` for the expired source.
+        foreach (CredentialSource source in sources)
+        {
             ClaudeCredential? credential = ReadCredential(source, out string? error);
             if (credential is null)
             {
@@ -216,30 +228,66 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             if (!IsExpired(credential))
                 return new(credential, null);
 
-            lastError = Strings.Claude_TokenInvalid;
             DiagnosticLog.Info($"Claude credential from {SourceLabel(source)} is expired");
-            if (!refreshExpired || source.Equals(skipRefreshFor))
-                continue;
-
-            RefreshToken(source);
-            credential = ReadCredential(source, out error);
-            if (credential is not null && !IsExpired(credential) && !IsRejected(credential, rejected))
-            {
-                DiagnosticLog.Info($"Claude credential refresh succeeded for {SourceLabel(source)}");
-                return new(credential, null);
-            }
-
-            DiagnosticLog.Warn($"Claude credential refresh did not produce usable credentials for {SourceLabel(source)}");
-            lastError = error ?? lastError;
+            lastError = Strings.Claude_TokenInvalid;
         }
 
-        if (!anySource)
+        // Pass 2: nothing usable as-is. Refresh the sources that have a CLI to
+        // drive (Windows / WSL); Claude Desktop rotates its own token, so there is
+        // nothing to refresh for it here.
+        if (refreshExpired)
         {
-            DiagnosticLog.Warn("Claude credential resolution found no Windows credentials or running WSL sources");
-            return new(null, Strings.Claude_CredNotFound);
+            foreach (CredentialSource source in sources)
+            {
+                if (source.Equals(skipRefreshFor) || !CanRefresh(source))
+                    continue;
+
+                RefreshToken(source);
+                ClaudeCredential? credential = ReadCredential(source, out string? error);
+                if (credential is not null && !IsExpired(credential) && !IsRejected(credential, rejected))
+                {
+                    DiagnosticLog.Info($"Claude credential refresh succeeded for {SourceLabel(source)}");
+                    return new(credential, null);
+                }
+
+                DiagnosticLog.Warn($"Claude credential refresh did not produce usable credentials for {SourceLabel(source)}");
+                lastError = error ?? lastError;
+            }
         }
 
-        return new(null, lastError ?? Strings.Claude_ReadCredFailed);
+        return new(null, BuildAuthError(sources, lastError));
+    }
+
+    private static bool CanRefresh(CredentialSource source) =>
+        source is WindowsCredentialSource or WslCredentialSource;
+
+    // Build the user-facing auth failure. A specific read/parse error is more
+    // useful than a generic "token invalid", so surface it as-is. Otherwise tell
+    // the user which apps to re-login in — naming only the sources actually
+    // present, so a Desktop-only user is not told to re-login in Claude Code.
+    private static string BuildAuthError(IReadOnlyList<CredentialSource> sources, string? lastError)
+    {
+        if (lastError is not null
+            && !string.Equals(lastError, Strings.Claude_TokenInvalid, StringComparison.Ordinal))
+            return lastError;
+
+        var apps = new List<string>();
+        foreach (CredentialSource source in sources)
+        {
+            string? app = source switch
+            {
+                WindowsCredentialSource => "Claude Code",
+                DesktopCredentialSource => "Claude Desktop",
+                WslCredentialSource => "Claude Code (WSL)",
+                _ => null,
+            };
+            if (app is not null && !apps.Contains(app))
+                apps.Add(app);
+        }
+
+        return apps.Count == 0
+            ? Strings.Claude_TokenInvalid
+            : string.Format(Strings.Claude_TokenInvalidFormat, string.Join(" / ", apps));
     }
 
     private static bool IsRejected(ClaudeCredential credential, ClaudeCredential? rejected) =>
@@ -513,6 +561,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
             string token = best.GetProperty("token").GetString()!;
             long? expiresAt = best.TryGetProperty("expiresAt", out JsonElement exp) ? ReadInt64(exp) : null;
+            // The oauth/usage and messages endpoints are Claude Code-scoped; a token
+            // from a non-code Desktop entry may be rejected (401) even when valid.
+            // Logging the chosen scope makes such a rejection attributable.
+            DiagnosticLog.Info($"Claude Desktop selected token scope: {(bestIsClaudeCode ? "claude_code" : "non-code")}");
             return new ClaudeCredential(token, expiresAt, source);
         }
         catch (Exception ex) when (ex is JsonException or FormatException or OverflowException)

@@ -165,6 +165,9 @@
   <data name="Claude_TokenInvalid" xml:space="preserve">
     <value>Token invalid (401). Please re-login in Claude Code.</value>
   </data>
+  <data name="Claude_TokenInvalidFormat" xml:space="preserve">
+    <value>Token invalid (401). Please re-login in {0}.</value>
+  </data>
   <data name="Claude_AuthRequiredTitle" xml:space="preserve">
     <value>Claude login required</value>
   </data>
