@@ -83,8 +83,9 @@ public sealed class CursorUsageProvider : IUsageProvider
             // error instead of an unhandled SocketException 995.
             return (await resp.Content.ReadAsStringAsync(ct), null);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // OperationCanceledException without a canceled token = HttpClient timeout.
             return (null, string.Format(Strings.Error_NetworkFormat, ex.Message));
         }
     }

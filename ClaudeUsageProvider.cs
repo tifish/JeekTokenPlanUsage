@@ -840,8 +840,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             // 995 here, not from SendAsync.
             body = await resp.Content.ReadAsStringAsync(ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // OperationCanceledException without a canceled token = HttpClient timeout,
+            // which we want to treat as a transient network failure, not a crash.
             DiagnosticLog.Warn($"Claude oauth/usage network error: {ex.Message}");
             return ProviderResult.Failed(string.Format(Strings.Error_NetworkFormat, ex.Message));
         }
@@ -890,8 +892,9 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             {
                 resp = await _http.SendAsync(req, ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                // OperationCanceledException without a canceled token = HttpClient timeout.
                 DiagnosticLog.Warn($"Claude messages fallback network error for {model}: {ex.Message}");
                 lastError = string.Format(Strings.Error_NetworkFormat, ex.Message);
                 continue;
