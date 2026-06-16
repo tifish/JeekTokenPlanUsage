@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using JeekTokenPlanUsage.Resources;
+using Microsoft.Win32;
 using WinTimer = System.Windows.Forms.Timer;
 
 namespace JeekTokenPlanUsage;
@@ -65,6 +66,14 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly DetailsForm _detailsForm;
     private readonly TaskbarWidget _taskbarWidget;
     private readonly SystemChangeListener _systemChangeListener;
+    private readonly SynchronizationContext? _uiContext;
+
+    // Track when each provider was last polled, so a wake/unlock event can skip
+    // providers whose data is still fresh (within one base poll interval). This
+    // keeps rapid lock/unlock cycles from firing a request per event.
+    private DateTimeOffset _claudeLastPollAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _codexLastPollAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _cursorLastPollAt = DateTimeOffset.MinValue;
 
     private UsageSnapshot? _claudeSnap;
     private UsageSnapshot? _codexSnap;
@@ -186,6 +195,16 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         // Repaint theme/display-aware surfaces as soon as Windows broadcasts changes.
         _systemChangeListener = new SystemChangeListener(OnSystemThemeChanged, OnDisplayMetricsChanged);
+
+        // Force a refresh on resume / unlock. The poll timer pauses while the user
+        // is away, and a WinForms Timer doesn't fire while the system sleeps — so
+        // when the user comes back overnight, the tray could otherwise show data
+        // hours stale until the next 30s idle-check tick happens to land. These
+        // events bypass the idle gate so the icon is current as soon as the user
+        // is back at the machine.
+        _uiContext = SynchronizationContext.Current;
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        SystemEvents.SessionSwitch += OnSessionSwitch;
 
         _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
         _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
@@ -383,6 +402,55 @@ public sealed class TrayApplicationContext : ApplicationContext
         try { Application.SetColorMode(SystemColorMode.System); } catch { }
         _detailsForm.NotifyThemeChanged();
         _taskbarWidget.NotifyThemeChanged();
+    }
+
+    // SystemEvents fires on a worker thread; marshal back to the UI thread before
+    // touching timers, snapshots, or HttpClient state.
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume)
+            PostForceRefresh("system resume");
+    }
+
+    private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
+    {
+        if (e.Reason == SessionSwitchReason.SessionUnlock
+            || e.Reason == SessionSwitchReason.ConsoleConnect
+            || e.Reason == SessionSwitchReason.RemoteConnect)
+            PostForceRefresh($"session {e.Reason}");
+    }
+
+    private void PostForceRefresh(string reason)
+    {
+        if (_disposed)
+            return;
+        _uiContext?.Post(_ =>
+        {
+            if (_disposed)
+                return;
+
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            TimeSpan window = TimeSpan.FromMilliseconds(_baseIntervalMs);
+
+            bool refreshClaude = _settings.ShowClaude && now - _claudeLastPollAt >= window;
+            bool refreshCodex = _settings.ShowCodex && now - _codexLastPollAt >= window;
+            bool refreshCursor = _settings.ShowCursor && now - _cursorLastPollAt >= window;
+
+            if (!refreshClaude && !refreshCodex && !refreshCursor)
+            {
+                DiagnosticLog.Info($"Skipping refresh on {reason}; all providers polled within base interval");
+                return;
+            }
+
+            DiagnosticLog.Info(
+                $"Forcing refresh on {reason} (claude={refreshClaude}, codex={refreshCodex}, cursor={refreshCursor})");
+            if (refreshClaude)
+                _ = RefreshClaudeAsync(force: true);
+            if (refreshCodex)
+                _ = RefreshCodexAsync(force: true);
+            if (refreshCursor)
+                _ = RefreshCursorAsync();
+        }, null);
     }
 
     private void OnDisplayMetricsChanged()
@@ -728,6 +796,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             UsageSnapshot snap = await _claude.GetUsageAsync(CancellationToken.None);
             if (_disposed)
                 return;
+            _claudeLastPollAt = DateTimeOffset.UtcNow;
             _claudeSnap = snap;
             _claudeIcons.Update(snap);
             RefreshDetailsIfVisible();
@@ -893,6 +962,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             UsageSnapshot snap = await _codex.GetUsageAsync(CancellationToken.None);
             if (_disposed)
                 return;
+            _codexLastPollAt = DateTimeOffset.UtcNow;
             _codexSnap = snap;
             _codexIcons.Update(snap);
             RefreshDetailsIfVisible();
@@ -968,6 +1038,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             UsageSnapshot snap = await _cursor.GetUsageAsync(CancellationToken.None);
             if (_disposed)
                 return;
+            _cursorLastPollAt = DateTimeOffset.UtcNow;
             _cursorSnap = snap;
             _cursorIcons.Update(snap);
             RefreshDetailsIfVisible();
@@ -1183,6 +1254,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (disposing && !_disposed)
         {
             _disposed = true;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
             _claudeTimer.Dispose();
             _codexTimer.Dispose();
             _cursorTimer.Dispose();
