@@ -228,9 +228,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         ApplyTimers();
 
         if (_settings.ShowClaude)
-            _ = RefreshClaudeAsync();
+            _ = RefreshClaudeAsync(force: true);
         if (_settings.ShowCodex)
-            _ = RefreshCodexAsync();
+            _ = RefreshCodexAsync(force: true);
         if (_settings.ShowCursor)
             _ = RefreshCursorAsync();
 

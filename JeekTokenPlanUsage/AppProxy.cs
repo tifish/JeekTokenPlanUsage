@@ -25,11 +25,11 @@ internal static class AppProxy
     // is installed as HttpClient.DefaultProxy. Resolving System mode through this
     // captured value (rather than HttpClient.DefaultProxy) avoids infinite
     // recursion once we are the process-wide default proxy.
-    private static IWebProxy _systemProxy = HttpClient.DefaultProxy;
+    private static IWebProxy? _systemProxy = HttpClient.DefaultProxy;
 
     /// Capture the original system proxy. Call once in Program.Main, before
     /// assigning HttpClient.DefaultProxy = Instance.
-    public static void ConfigureSystemProxy(IWebProxy systemProxy) => _systemProxy = systemProxy;
+    public static void ConfigureSystemProxy(IWebProxy? systemProxy) => _systemProxy = systemProxy;
 
     /// Resolve the proxy URI to use for a destination under the current mode,
     /// or null for a direct connection. Reused when building the curl config so
@@ -40,8 +40,17 @@ internal static class AppProxy
         ProxyMode.Custom => _settings.BuildCustomProxyUri(),
         // System: defer to the Windows system proxy (WinINET/WinHTTP) captured at
         // startup (see ConfigureSystemProxy). Returns null when none is set.
-        _ => _systemProxy.GetProxy(destination),
+        _ => ResolveSystemProxy(_systemProxy, destination),
     };
+
+    private static Uri? ResolveSystemProxy(IWebProxy? proxy, Uri destination)
+    {
+        if (proxy is null || proxy.IsBypassed(destination))
+            return null;
+
+        Uri? proxyUri = proxy.GetProxy(destination);
+        return proxyUri is null || proxyUri == destination ? null : proxyUri;
+    }
 
     /// A fresh handler wired to the shared dynamic proxy. UseProxy stays true
     /// across all modes — Direct is expressed by GetProxy returning null.
