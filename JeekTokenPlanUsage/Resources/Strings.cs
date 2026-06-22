@@ -14,6 +14,7 @@ internal static class Strings
     private static string Get(string key) =>
         Rm.GetString(key, CultureInfo.CurrentUICulture) ?? key;
 
+    public static string Menu_Pause => Get(nameof(Menu_Pause));
     public static string Menu_RefreshNow => Get(nameof(Menu_RefreshNow));
     public static string Menu_RunAtStartup => Get(nameof(Menu_RunAtStartup));
     public static string Menu_ShowClaude => Get(nameof(Menu_ShowClaude));
@@ -60,6 +61,7 @@ internal static class Strings
     public static string Notify_BodyFormat => Get(nameof(Notify_BodyFormat));
 
     public static string Tray_Loading => Get(nameof(Tray_Loading));
+    public static string Tray_PausedSuffix => Get(nameof(Tray_PausedSuffix));
     public static string Tray_NoData => Get(nameof(Tray_NoData));
     public static string Tray_ResetFormat => Get(nameof(Tray_ResetFormat));
     public static string Tray_WeeklyLabel => Get(nameof(Tray_WeeklyLabel));

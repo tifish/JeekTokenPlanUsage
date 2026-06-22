@@ -42,6 +42,12 @@ internal sealed class AppSettings
     public bool ShowCodex { get; set; } = true;
     public bool ShowCursor { get; set; } = true;
 
+    /// When true, all monitoring is suspended: every poll timer is stopped, the
+    /// auto-update check is skipped, and manual / resume / unlock refreshes are
+    /// no-ops. Persisted so an intentional pause survives restarts (and the
+    /// app's own auto-update relaunch).
+    public bool Paused { get; set; } = false;
+
     /// How many icons each enabled provider shows in the tray. Persisted as a
     /// string so the settings file stays human-readable.
     [JsonConverter(typeof(JsonStringEnumConverter))]

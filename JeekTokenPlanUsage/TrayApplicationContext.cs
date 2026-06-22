@@ -97,11 +97,13 @@ public sealed class TrayApplicationContext : ApplicationContext
     private int _codexRetryCount;
     private bool _cursorBusy;
     private bool _disposed;
+    private bool _paused;
 
     // Menu items kept as fields so they can be re-localized in place when the
     // user switches language without rebuilding (and re-wiring) the menu.
     // Not readonly: BuildMenu assigns them, which the compiler can't see as
     // a constructor-only init even though it's only called from the ctor.
+    private ToolStripMenuItem _pauseItem = null!;
     private ToolStripMenuItem _refreshItem = null!;
     private ToolStripMenuItem _startupItem = null!;
     private ToolStripMenuItem _showClaudeItem = null!;
@@ -129,6 +131,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _settings = AppSettings.Load();
+        _paused = _settings.Paused;
         AppProxy.Configure(_settings);
         _baseIntervalMs = ClampPollMinutes(_settings.PollMinutes) * 60_000;
 
@@ -227,12 +230,21 @@ public sealed class TrayApplicationContext : ApplicationContext
         WireProxyMenu();
         ApplyTimers();
 
-        if (_settings.ShowClaude)
-            _ = RefreshClaudeAsync(force: true);
-        if (_settings.ShowCodex)
-            _ = RefreshCodexAsync(force: true);
-        if (_settings.ShowCursor)
-            _ = RefreshCursorAsync();
+        _pauseItem.Checked = _paused;
+        _pauseItem.Click += (_, _) => SetPaused(!_paused);
+        _refreshItem.Enabled = !_paused;
+        _checkUpdateItem.Enabled = !_paused;
+        ApplyPausedVisuals();
+
+        if (!_paused)
+        {
+            if (_settings.ShowClaude)
+                _ = RefreshClaudeAsync(force: true);
+            if (_settings.ShowCodex)
+                _ = RefreshCodexAsync(force: true);
+            if (_settings.ShowCursor)
+                _ = RefreshCursorAsync();
+        }
 
         _startupItem.Checked = _settings.RunAtStartup;
         _startupItem.Click += (_, _) =>
@@ -314,7 +326,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _updateTimer = new WinTimer { Interval = (int)UpdateCheckInterval.TotalMilliseconds };
         _updateTimer.Tick += async (_, _) => await CheckForUpdatesAsync(manual: false);
-        if (_settings.AutoUpdate)
+        if (_settings.AutoUpdate && !_paused)
             _updateTimer.Start();
 
         _autoUpdateItem.Checked = _settings.AutoUpdate;
@@ -340,7 +352,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             ((WinTimer)s!).Stop();
             ((WinTimer)s!).Dispose();
-            if (!_disposed && _settings.AutoUpdate)
+            if (!_disposed && _settings.AutoUpdate && !_paused)
                 await CheckForUpdatesAsync(manual: false);
         };
         initialDelayTimer.Start();
@@ -422,7 +434,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void PostForceRefresh(string reason)
     {
-        if (_disposed)
+        if (_disposed || _paused)
             return;
         _uiContext?.Post(_ =>
         {
@@ -472,6 +484,16 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ApplyTimers()
     {
+        // While paused the app does nothing — keep every poll timer stopped
+        // regardless of which providers are enabled. Resuming calls back in here.
+        if (_paused)
+        {
+            _claudeTimer.Stop();
+            _codexTimer.Stop();
+            _cursorTimer.Stop();
+            return;
+        }
+
         if (_settings.ShowClaude)
             _claudeTimer.Start();
         else
@@ -486,6 +508,51 @@ public sealed class TrayApplicationContext : ApplicationContext
             _cursorTimer.Start();
         else
             _cursorTimer.Stop();
+    }
+
+    // Toggle the global pause. While paused the app performs no work: every poll
+    // timer and the update timer are stopped, and all refresh entry points
+    // (manual, left-click, resume/unlock) short-circuit. Resuming restarts the
+    // timers and forces an immediate refresh so the tray catches up at once.
+    private void SetPaused(bool paused)
+    {
+        if (_paused == paused)
+            return;
+        _paused = paused;
+        _settings.Paused = paused;
+        _settings.Save();
+
+        _pauseItem.Checked = paused;
+        _refreshItem.Enabled = !paused;
+        _checkUpdateItem.Enabled = !paused;
+        ApplyPausedVisuals();
+
+        ApplyTimers(); // paused-aware: stops every timer while paused, restarts otherwise
+        if (paused)
+        {
+            _updateTimer.Stop();
+            Log.Info("Monitoring paused by user");
+        }
+        else
+        {
+            if (_settings.AutoUpdate)
+                _updateTimer.Start();
+            Log.Info("Monitoring resumed by user");
+            _ = RefreshAllAsync(forceClaude: true, forceCodex: true);
+        }
+    }
+
+    // Reflect the paused state on the tray surfaces: append a "(Paused)" marker
+    // to each provider's tooltip and the anchor's, so a frozen icon reads as
+    // intentionally paused rather than merely stale.
+    private void ApplyPausedVisuals()
+    {
+        _claudeIcons.SetPaused(_paused);
+        _codexIcons.SetPaused(_paused);
+        _cursorIcons.SetPaused(_paused);
+        _anchor.Text = _paused
+            ? "JeekTokenPlanUsage" + Strings.Tray_PausedSuffix
+            : "JeekTokenPlanUsage";
     }
 
     private void WireIconDisplayMenu()
@@ -614,6 +681,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void RelocalizeMenu()
     {
+        _pauseItem.Text = Strings.Menu_Pause;
         _refreshItem.Text = Strings.Menu_RefreshNow;
         _startupItem.Text = Strings.Menu_RunAtStartup;
         _showClaudeItem.Text = Strings.Menu_ShowClaude;
@@ -645,6 +713,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         foreach (ToolStripItem raw in _languageItem.DropDownItems)
             if (raw is ToolStripMenuItem mi && mi.Tag is string code)
                 mi.Checked = (code == _settings.Language);
+
+        // Re-render the paused marker in the new language. When not paused this
+        // is a no-op suffix; the metric text itself is refreshed by the caller.
+        ApplyPausedVisuals();
     }
 
     private static string IconDisplayLabel(IconDisplayMode mode) => mode switch
@@ -662,6 +734,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         ToolStripManager.Renderer = new ThemedMenuRenderer();
 
         var menu = new ContextMenuStrip();
+
+        _pauseItem = new ToolStripMenuItem(Strings.Menu_Pause);
 
         _refreshItem = new ToolStripMenuItem(Strings.Menu_RefreshNow);
         _refreshItem.Click += async (_, _) => await RefreshAllAsync(forceClaude: true, forceCodex: true);
@@ -720,6 +794,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _exitItem = new ToolStripMenuItem(Strings.Menu_Exit);
         _exitItem.Click += (_, _) => ExitThread();
 
+        menu.Items.Add(_pauseItem);
         menu.Items.Add(_refreshItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_startupItem);
@@ -757,7 +832,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private async Task RefreshClaudeAsync(bool force = false)
     {
-        if (_claudeBusy || _disposed)
+        if (_claudeBusy || _disposed || _paused)
             return;
         _claudeBusy = true;
         try
@@ -923,7 +998,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private async Task RefreshCodexAsync(bool force = false)
     {
-        if (_codexBusy || _disposed)
+        if (_codexBusy || _disposed || _paused)
             return;
         _codexBusy = true;
         try
@@ -1030,7 +1105,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private async Task RefreshCursorAsync()
     {
-        if (_cursorBusy || _disposed)
+        if (_cursorBusy || _disposed || _paused)
             return;
         _cursorBusy = true;
         try
@@ -1051,7 +1126,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private async Task CheckForUpdatesAsync(bool manual)
     {
-        if (_updateInProgress || _disposed)
+        if (_updateInProgress || _disposed || _paused)
             return;
         _updateInProgress = true;
         try
@@ -1357,6 +1432,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         private Icon? _secondaryIcon;
         private IconDisplayMode _mode = IconDisplayMode.Double;
         private UsageSnapshot? _lastSnap;
+        private bool _paused;
 
         public ProviderIcons(
             string displayName,
@@ -1423,6 +1499,27 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (_mode == IconDisplayMode.None)
                 return;
             RenderState(snap);
+        }
+
+        // Re-render tooltips to add/remove the paused marker. Icon images keep
+        // their last value — pausing freezes the data, it doesn't blank it. With
+        // no snapshot yet (cold start while paused) fall back to the loading
+        // tooltip plus the marker so the icon still reads as paused.
+        public void SetPaused(bool paused)
+        {
+            _paused = paused;
+            if (_lastSnap is not null)
+            {
+                RenderState(_lastSnap);
+            }
+            else
+            {
+                string text = paused
+                    ? Strings.Tray_Loading + Strings.Tray_PausedSuffix
+                    : Strings.Tray_Loading;
+                _primary.Text = text;
+                _secondary.Text = text;
+            }
         }
 
         public bool ShowNotification(string title, string message)
@@ -1503,7 +1600,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             current?.Dispose();
             current = rendered;
 
-            target.Text = Truncate(tooltip);
+            target.Text = Truncate(_paused ? tooltip + Strings.Tray_PausedSuffix : tooltip);
 
             if (!error && metric is not null)
                 CheckThresholds(target, spec, metric, thresholdState);
