@@ -35,7 +35,7 @@ jobs:
                   Write-Host "commit count = $count"
 
             - name: Build
-              run: dotnet publish --configuration Release ${{ env.PROJECT_NAME }}.csproj /p:Version=${{ steps.ver.outputs.count }}
+              run: dotnet publish --configuration Release ${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj /p:Version=${{ steps.ver.outputs.count }}
 
             - name: Pack files
               shell: pwsh

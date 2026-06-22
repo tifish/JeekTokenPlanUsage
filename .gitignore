@@ -7,10 +7,11 @@ obj/
 x64/
 x86/
 
-# AutoUpdate.ps1 lives in bin/ as a tracked file (the canonical source —
-# there is no copy at the project root). Re-includes the single file while
-# the rest of bin/ stays ignored.
+# These scripts live in bin/ as the canonical tracked copies (the updater plus
+# the .NET runtime setup). Re-include them while the rest of bin/ stays ignored.
 !bin/AutoUpdate.ps1
+!bin/Setup.cmd
+!bin/dotnet-install.ps1
 
 # Publish artifacts
 *.7z

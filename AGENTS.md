@@ -1,9 +1,11 @@
 # AGENTS.md
 
-- 提交代码的注释使用英文。
-- 提交代码的注释尽量简短，一两句话说明目的即可，不需要提供实现细节。
-- 构建时如果程序在运行，直接杀进程。
-- 实现功能和修改 bug 后，直接运行程序给我测试。
+## Rules
+
+- After finishing a feature or fixing a bug, automatically build and launch the program for me to test. If the program is already running, kill the process and run it again.
+- Always use rebase and fast-forward for Git, never merge.
+- Use English for commit messages, keeping them to a brief sentence or two stating the purpose without elaborating on implementation details.
+- Do not copy runtime files from the source directory; keep and version-control them directly under the bin directory.
 
 ## 参考
 
@@ -12,5 +14,6 @@
 - [Claude 用量获取](docs/claude-usage.md)
 - [Codex 用量获取](docs/codex-usage.md)
 - [Cursor 用量获取](docs/cursor-usage.md)
+- [自动更新](docs/auto-update.md)
 - [托盘图标实现](docs/tray-icon.md)
 - [任务栏组件实现](docs/taskbar-widget.md)

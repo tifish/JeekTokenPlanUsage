@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using JeekTools;
 
 namespace JeekTokenPlanUsage;
 
@@ -53,7 +54,7 @@ public static class AutoUpdate
     /// Short English description set whenever the most recent check returned
     /// <see cref="UpdateCheckOutcome.Failed"/>. Cleared on every check entry
     /// so callers reading it always see the current run's state. Detailed
-    /// diagnostics still go to <see cref="DiagnosticLog"/>.
+    /// diagnostics still go to <see cref="Log"/>.
     public static string FailureReason { get; private set; } = "";
 
     public static async Task<UpdateCheckOutcome> HasUpdateAsync(bool disableMirror)
@@ -76,16 +77,16 @@ public static class AutoUpdate
                 // Probe mirrors against the zip URL (the larger artifact); the
                 // chosen mirror index is cached, so the second call below is
                 // free and yields the version.txt URL on the same host.
-                string zipMirror = await GitHubMirrors.GetFastestMirrorAsync(ReleaseZipUrl);
+                string zipMirror = await GitHubMirrors.GetFastestMirror(ReleaseZipUrl);
                 if (string.IsNullOrEmpty(zipMirror))
                     return Fail("no reachable mirror");
                 DownloadUrl = zipMirror;
-                versionUrl = await GitHubMirrors.GetFastestMirrorAsync(VersionTxtUrl);
+                versionUrl = await GitHubMirrors.GetFastestMirror(VersionTxtUrl);
                 if (string.IsNullOrEmpty(versionUrl))
                     versionUrl = VersionTxtUrl;
             }
 
-            string? remote = await GitHubMirrors.DownloadTextAsync(versionUrl);
+            string? remote = await MirrorHttp.DownloadTextAsync(versionUrl);
             if (string.IsNullOrWhiteSpace(remote))
                 return Fail($"empty version.txt from {versionUrl}");
 
@@ -103,12 +104,12 @@ public static class AutoUpdate
 
             if (RemoteCommitCount > LocalCommitCount)
             {
-                DiagnosticLog.Info(
+                Log.Info(
                     $"AutoUpdate: local={LocalCommitCount} remote={RemoteCommitCount} — update available");
                 return UpdateCheckOutcome.Available;
             }
 
-            DiagnosticLog.Info(
+            Log.Info(
                 $"AutoUpdate: local={LocalCommitCount} remote={RemoteCommitCount} — up to date");
             return UpdateCheckOutcome.UpToDate;
         }
@@ -121,7 +122,7 @@ public static class AutoUpdate
     private static UpdateCheckOutcome Fail(string reason)
     {
         FailureReason = reason;
-        DiagnosticLog.Warn($"AutoUpdate: {reason}");
+        Log.Warn($"AutoUpdate: {reason}");
         return UpdateCheckOutcome.Failed;
     }
 
@@ -139,7 +140,7 @@ public static class AutoUpdate
             string scriptPath = Path.Combine(workDir, UpdateScriptName);
             if (!File.Exists(scriptPath))
             {
-                DiagnosticLog.Error($"AutoUpdate: script not found at {scriptPath}");
+                Log.Error($"AutoUpdate: script not found at {scriptPath}");
                 return false;
             }
 
@@ -152,13 +153,13 @@ public static class AutoUpdate
                 WindowStyle = ProcessWindowStyle.Normal,
             });
 
-            DiagnosticLog.Info("AutoUpdate: launched updater; exiting");
+            Log.Info("AutoUpdate: launched updater; exiting");
             Application.Exit();
             return true;
         }
         catch (Exception ex)
         {
-            DiagnosticLog.Error($"AutoUpdate: failed to launch updater: {ex.Message}");
+            Log.Error($"AutoUpdate: failed to launch updater: {ex.Message}");
             return false;
         }
     }

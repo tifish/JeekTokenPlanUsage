@@ -36,13 +36,13 @@ public sealed class CodexUsageProvider : IUsageProvider
         FetchResult result = await FetchUsageAsync(auth, ct);
         if (result.AuthFailed)
         {
-            DiagnosticLog.Warn("Codex usage auth failed; attempting CLI refresh");
+            Log.Warn("Codex usage auth failed; attempting CLI refresh");
             RefreshCodexToken();
 
             CodexAuth? refreshed = ReadAuth(out _);
             if (refreshed is null || string.Equals(refreshed.AccessToken, auth.AccessToken, StringComparison.Ordinal))
             {
-                DiagnosticLog.Warn("Codex auth retry skipped: refreshed credential unavailable or unchanged");
+                Log.Warn("Codex auth retry skipped: refreshed credential unavailable or unchanged");
                 return UsageSnapshot.FromError(Strings.Codex_TokenInvalid, UsageErrorKind.Auth);
             }
 
@@ -62,24 +62,24 @@ public sealed class CodexUsageProvider : IUsageProvider
         (string stdout, string stderr, int exitCode) = await RunCurlAsync(config, ct);
         if (exitCode != 0)
         {
-            DiagnosticLog.Warn($"Codex curl failed: exit {exitCode}; {Trim(stderr)}");
+            Log.Warn($"Codex curl failed: exit {exitCode}; {Trim(stderr)}");
             return FetchResult.Failed(string.Format(Strings.Codex_CurlFailedFormat, exitCode, Trim(stderr)));
         }
 
         (string body, int status) = SplitStatus(stdout);
         if (status is 401 or 403)
         {
-            DiagnosticLog.Warn($"Codex usage auth error HTTP {status}");
+            Log.Warn($"Codex usage auth error HTTP {status}");
             return FetchResult.Auth();
         }
         if (status == 429)
         {
-            DiagnosticLog.Warn("Codex usage HTTP 429");
+            Log.Warn("Codex usage HTTP 429");
             return FetchResult.Failed(Strings.Error_RateLimit429);
         }
         if (status is < 200 or >= 300)
         {
-            DiagnosticLog.Warn($"Codex usage HTTP {status}");
+            Log.Warn($"Codex usage HTTP {status}");
             return FetchResult.Failed($"HTTP {status}");
         }
 
@@ -234,7 +234,7 @@ public sealed class CodexUsageProvider : IUsageProvider
         }
         catch (Exception ex)
         {
-            DiagnosticLog.Error($"Codex auth read failed: {ex.Message}");
+            Log.Error($"Codex auth read failed: {ex.Message}");
             error = string.Format(Strings.Codex_ReadAuthFailedFormat, ex.Message);
             return null;
         }
@@ -263,7 +263,7 @@ public sealed class CodexUsageProvider : IUsageProvider
             args = new[] { "exec", "." };
         }
 
-        DiagnosticLog.Info($"Attempting Codex token refresh via {Path.GetFileName(codexPath)}");
+        Log.Info($"Attempting Codex token refresh via {Path.GetFileName(codexPath)}");
         ProcessResult result = RunProcess(
             fileName,
             args,
@@ -272,7 +272,7 @@ public sealed class CodexUsageProvider : IUsageProvider
             captureOutput: false,
             logSuccess: true);
         if (!result.Succeeded)
-            DiagnosticLog.Warn($"Codex token refresh failed: {ProcessSummary(result)}");
+            Log.Warn($"Codex token refresh failed: {ProcessSummary(result)}");
     }
 
     private static string ResolveCodexPath()
@@ -292,13 +292,13 @@ public sealed class CodexUsageProvider : IUsageProvider
                     .FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(first))
                 {
-                    DiagnosticLog.Info($"Resolved Codex CLI path: {Path.GetFileName(first.Trim())}");
+                    Log.Info($"Resolved Codex CLI path: {Path.GetFileName(first.Trim())}");
                     return first.Trim();
                 }
             }
         }
 
-        DiagnosticLog.Warn("Codex CLI path not found with where.exe; falling back to codex.cmd");
+        Log.Warn("Codex CLI path not found with where.exe; falling back to codex.cmd");
         return "codex.cmd";
     }
 
@@ -331,7 +331,7 @@ public sealed class CodexUsageProvider : IUsageProvider
             {
                 var result = new ProcessResult(false, Error: "Process.Start returned null");
                 if (logFailure)
-                    DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+                    Log.Warn($"{purpose} failed: {ProcessSummary(result)}");
                 return result;
             }
 
@@ -343,7 +343,7 @@ public sealed class CodexUsageProvider : IUsageProvider
                 try { process.Kill(entireProcessTree: true); } catch { }
                 var result = new ProcessResult(false, TimedOut: true);
                 if (logFailure)
-                    DiagnosticLog.Warn($"{purpose} timed out after {timeout.TotalSeconds:0.#} seconds");
+                    Log.Warn($"{purpose} timed out after {timeout.TotalSeconds:0.#} seconds");
                 return result;
             }
 
@@ -353,11 +353,11 @@ public sealed class CodexUsageProvider : IUsageProvider
             if (completed.Succeeded)
             {
                 if (logSuccess)
-                    DiagnosticLog.Info($"{purpose} succeeded");
+                    Log.Info($"{purpose} succeeded");
             }
             else if (logFailure)
             {
-                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(completed)}");
+                Log.Warn($"{purpose} failed: {ProcessSummary(completed)}");
             }
 
             return completed;
@@ -366,7 +366,7 @@ public sealed class CodexUsageProvider : IUsageProvider
         {
             var result = new ProcessResult(false, Error: ex.Message);
             if (logFailure)
-                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+                Log.Warn($"{purpose} failed: {ProcessSummary(result)}");
             return result;
         }
     }

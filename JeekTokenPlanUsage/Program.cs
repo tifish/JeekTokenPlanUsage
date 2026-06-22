@@ -1,4 +1,5 @@
 using System.Globalization;
+using JeekTools;
 
 namespace JeekTokenPlanUsage;
 
@@ -15,6 +16,9 @@ internal static class Program
         if (!createdNew)
             return;
 
+        ConfigureLogging();
+        ConfigureProxy();
+
         SystemUiCulture = CultureInfo.CurrentUICulture;
         ApplyLanguageOverride();
         ApplicationConfiguration.Initialize();
@@ -24,6 +28,33 @@ internal static class Program
         Application.Run(new TrayApplicationContext());
 
         GC.KeepAlive(mutex);
+    }
+
+    private static void ConfigureLogging()
+    {
+        // Route all logging through JeekTools.LogManager (ZLogger rolling files).
+        // An absolute LogsDirectory overrides LogManager's default (next to the
+        // exe); keeping logs under %LocalAppData% survives updates and avoids a
+        // possibly read-only install directory.
+        LogManager.LogsDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "JeekTokenPlanUsage",
+            "Logs"
+        );
+        LogManager.ToFile = true;
+        LogManager.RollingSizeKB = 1024;
+        LogManager.RetainFileLimit = TimeSpan.FromDays(7);
+        LogManager.EnableLogging();
+    }
+
+    private static void ConfigureProxy()
+    {
+        // Capture the real system proxy, then install our dynamic proxy as the
+        // process-wide default so every plain HttpClient (including JeekTools'
+        // mirror probing) honors the app's proxy mode. Capture must precede the
+        // assignment, or AppProxy's System mode would recurse into itself.
+        AppProxy.ConfigureSystemProxy(HttpClient.DefaultProxy);
+        HttpClient.DefaultProxy = AppProxy.Instance;
     }
 
     private static void ApplyLanguageOverride()

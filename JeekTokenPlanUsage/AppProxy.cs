@@ -21,6 +21,16 @@ internal static class AppProxy
     /// later mutations to the same instance are picked up automatically.
     public static void Configure(AppSettings settings) => _settings = settings;
 
+    // The real Windows system proxy, captured at startup before AppProxy.Instance
+    // is installed as HttpClient.DefaultProxy. Resolving System mode through this
+    // captured value (rather than HttpClient.DefaultProxy) avoids infinite
+    // recursion once we are the process-wide default proxy.
+    private static IWebProxy _systemProxy = HttpClient.DefaultProxy;
+
+    /// Capture the original system proxy. Call once in Program.Main, before
+    /// assigning HttpClient.DefaultProxy = Instance.
+    public static void ConfigureSystemProxy(IWebProxy systemProxy) => _systemProxy = systemProxy;
+
     /// Resolve the proxy URI to use for a destination under the current mode,
     /// or null for a direct connection. Reused when building the curl config so
     /// the shell-out matches the HttpClient paths.
@@ -28,9 +38,9 @@ internal static class AppProxy
     {
         ProxyMode.Direct => null,
         ProxyMode.Custom => _settings.BuildCustomProxyUri(),
-        // System: defer to the Windows system proxy (WinINET/WinHTTP) that
-        // HttpClient.DefaultProxy already reflects. Returns null when none is set.
-        _ => HttpClient.DefaultProxy.GetProxy(destination),
+        // System: defer to the Windows system proxy (WinINET/WinHTTP) captured at
+        // startup (see ConfigureSystemProxy). Returns null when none is set.
+        _ => _systemProxy.GetProxy(destination),
     };
 
     /// A fresh handler wired to the shared dynamic proxy. UseProxy stays true

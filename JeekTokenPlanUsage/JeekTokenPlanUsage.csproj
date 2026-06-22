@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>JeekTokenPlanUsage</AssemblyName>
+    <RootNamespace>JeekTokenPlanUsage</RootNamespace>
+    <!-- English is the neutral (default) language; Strings.resx holds English and
+         unsupported UI cultures fall back to it. Chinese ships as the zh-CN satellite. -->
+    <NeutralLanguage>en</NeutralLanguage>
+    <!-- Only zh-CN is a satellite (en lives in the main assembly). Do NOT set this
+         to "en" like the generic template, or the Chinese satellite gets stripped. -->
+    <SatelliteResourceLanguages>zh-CN</SatelliteResourceLanguages>
+    <!-- Project lives in a subdirectory; output goes to the repo-root bin/. -->
+    <OutDir>..\bin</OutDir>
+    <PublishDir>$(OutDir)</PublishDir>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <CETCompat>false</CETCompat>
+    <!-- Application.SetColorMode / IsDarkModeEnabled are still flagged experimental in .NET 10. -->
+    <NoWarn>$(NoWarn);WFO5001</NoWarn>
+    <!-- Sentinel version for local dev builds. CI overrides with
+         /p:Version=<git-commit-count> so AssemblyVersion.Major becomes the
+         count. AutoUpdate refuses to auto-replace when Major == 0, which
+         protects a dev's working tree from being overwritten by a release. -->
+    <Version>0</Version>
+  </PropertyGroup>
+
+  <!-- NetBeauty: relocate dependency DLLs into ./Libs (relative to OutDir) so
+       bin/ stays tidy. See https://github.com/nulastudio/NetBeauty2 -->
+  <PropertyGroup>
+    <BeautySharedRuntimeMode>False</BeautySharedRuntimeMode>
+    <BeautyLibsDir Condition="$(BeautySharedRuntimeMode) == 'True'">../Libs</BeautyLibsDir>
+    <BeautyLibsDir Condition="$(BeautySharedRuntimeMode) != 'True'">./Libs</BeautyLibsDir>
+    <DisableBeauty>False</DisableBeauty>
+    <BeautyOnPublishOnly>False</BeautyOnPublishOnly>
+    <BeautyNoRuntimeInfo>False</BeautyNoRuntimeInfo>
+    <BeautyEnableDebugging>False</BeautyEnableDebugging>
+    <BeautyUsePatch>True</BeautyUsePatch>
+    <BeautyLogLevel>Info</BeautyLogLevel>
+    <!-- Uncomment if the HostFXRPatcher download from GitHub is blocked. -->
+    <!-- <BeautyGitCDN>https://gitee.com/liesauer/HostFXRPatcher</BeautyGitCDN> -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <PackageReference Include="nulastudio.NetBeauty" Version="2.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JeekTools.NET\JeekTools.csproj" />
+  </ItemGroup>
+</Project>

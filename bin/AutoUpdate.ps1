@@ -1,22 +1,20 @@
-# JeekTokenPlanUsage self-updater. Launched by the running app right before
-# it exits; waits for the process to release file locks, downloads the new
-# .zip into %TEMP%, sweeps the stale binaries out of the install directory,
-# expands the archive in place, and restarts the app.
+﻿# JeekTokenPlanUsage self-updater. Launched by the running app right before it
+# exits; waits for the process to release file locks, downloads the new .zip into
+# %TEMP%, clears the install directory (preserving user data and the committed
+# scripts), expands the archive in place, and restarts the app.
 #
-# Version identity is the total git commit count, stamped into AssemblyVersion
-# at CI build time. This script therefore does not need to touch file
-# timestamps — extraction order and zip DOS-time quirks no longer affect
-# the next update check.
+# Wipe-and-extract (rather than deleting only *.dll) so stale files under the
+# NetBeauty Libs/ folder don't accumulate across updates.
 
 $ErrorActionPreference = "Stop"
 $appName = "JeekTokenPlanUsage"
+$installDir = $PSScriptRoot
 
 # Wait for the previous instance to fully exit so we can replace files.
-$processes = Get-Process -Name $appName -ErrorAction SilentlyContinue
-foreach ($p in $processes) {
+Get-Process -Name $appName -ErrorAction SilentlyContinue | ForEach-Object {
     try {
-        Write-Host "Waiting for $appName (pid $($p.Id)) to exit..."
-        $p.WaitForExit()
+        Write-Host "Waiting for $appName (pid $($_.Id)) to exit..."
+        $_.WaitForExit()
     } catch {}
 }
 
@@ -28,13 +26,14 @@ if ($args.Count -eq 0) {
 
 $downloadUrl = $args[0]
 $packPath = Join-Path $env:TEMP "$appName.zip"
+$stageDir = Join-Path $env:TEMP "$appName-update"
 
 try {
     Write-Host "Downloading update from $downloadUrl..."
     # WebClient is faster than Invoke-WebRequest for large binary downloads and
     # doesn't burn memory buffering the whole response.
     $client = New-Object System.Net.WebClient
-    $client.Headers.Add("User-Agent", "JeekTokenPlanUsage-Updater/1.0")
+    $client.Headers.Add("User-Agent", "$appName-Updater/1.0")
     $client.DownloadFile($downloadUrl, $packPath)
 
     if (-not (Test-Path $packPath)) {
@@ -43,25 +42,28 @@ try {
         Exit 1
     }
 
-    # Sweep old binaries; user data lives under %APPDATA%\JeekTokenPlanUsage,
-    # so nothing here is destructive to settings or logs.
-    Get-ChildItem -Path $PSScriptRoot -Filter "*.dll"               -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $PSScriptRoot -Filter "*.pdb"               -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $PSScriptRoot -Filter "*.deps.json"         -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $PSScriptRoot -Filter "*.runtimeconfig.json" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    Write-Host "Extracting update package..."
+    Remove-Item -Recurse -Force -LiteralPath $stageDir -ErrorAction SilentlyContinue
+    Expand-Archive -Path $packPath -DestinationPath $stageDir -Force
 
-    # Localization satellite assemblies live in culture-named subfolders;
-    # delete the folders so removed cultures don't accumulate.
-    foreach ($dir in Get-ChildItem -Path $PSScriptRoot -Directory -ErrorAction SilentlyContinue) {
-        if ($dir.Name -match '^[a-z]{2}(-[A-Za-z]{2,4})?$') {
-            Remove-Item -Recurse -Force -Path $dir.FullName -ErrorAction SilentlyContinue
-        }
+    $stagedExe = Join-Path $stageDir "$appName.exe"
+    if (-not (Test-Path -LiteralPath $stagedExe)) {
+        Write-Host "Update package is missing $appName.exe."
+        Start-Sleep -Seconds 5
+        Exit 1
     }
 
-    Write-Host "Expanding archive into $PSScriptRoot..."
-    Expand-Archive -Path $packPath -DestinationPath $PSScriptRoot -Force
+    # Clear the install dir but preserve portable user data and the committed
+    # scripts (the package carries them too, so they are restored regardless).
+    $preserveNames = @("Config", "AutoUpdate.ps1", "Setup.cmd", "dotnet-install.ps1")
+    Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue |
+        Where-Object { $preserveNames -inotcontains $_.Name } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-    Remove-Item -Force -Path $packPath -ErrorAction SilentlyContinue
+    Copy-Item -Path (Join-Path $stageDir "*") -Destination $installDir -Recurse -Force
+
+    Remove-Item -Recurse -Force -LiteralPath $stageDir -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $packPath -ErrorAction SilentlyContinue
 }
 catch {
     Write-Host "Update failed: $($_.Exception.Message)"
@@ -69,7 +71,7 @@ catch {
 }
 
 # Restart the app, forwarding any extra arguments the caller passed through.
-$exePath = Join-Path $PSScriptRoot "$appName.exe"
+$exePath = Join-Path $installDir "$appName.exe"
 if (Test-Path $exePath) {
     Write-Host "Starting $appName..."
     if ($args.Count -gt 1) {

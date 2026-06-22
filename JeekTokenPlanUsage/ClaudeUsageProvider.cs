@@ -91,16 +91,16 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             ct);
         if (resolved.Credential is null)
         {
-            DiagnosticLog.Warn($"Claude credential resolution failed: {resolved.Error ?? "unknown"}");
+            Log.Warn($"Claude credential resolution failed: {resolved.Error ?? "unknown"}");
             return UsageSnapshot.FromError(resolved.Error ?? Strings.Claude_ReadCredFailed, UsageErrorKind.Auth);
         }
 
-        DiagnosticLog.Info($"Claude resolved credential from {SourceLabel(resolved.Credential.Source)}");
+        Log.Info($"Claude resolved credential from {SourceLabel(resolved.Credential.Source)}");
         ProviderResult result = await FetchUsageWithFallbackAsync(resolved.Credential.AccessToken, ct);
         if (result.AuthFailed)
         {
             CredentialSource source = resolved.Credential.Source;
-            DiagnosticLog.Warn($"Claude auth failed with {SourceLabel(source)}; attempting CLI refresh");
+            Log.Warn($"Claude auth failed with {SourceLabel(source)}; attempting CLI refresh");
             CredentialResolution retryCred = await Task.Run(
                 () =>
                 {
@@ -110,11 +110,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 ct);
             if (retryCred.Credential is null)
             {
-                DiagnosticLog.Warn("Claude auth retry skipped: refreshed credential unavailable or unchanged");
+                Log.Warn("Claude auth retry skipped: refreshed credential unavailable or unchanged");
                 return UsageSnapshot.FromError(retryCred.Error ?? Strings.Claude_TokenInvalid, UsageErrorKind.Auth);
             }
 
-            DiagnosticLog.Info($"Claude resolved credential from {SourceLabel(retryCred.Credential.Source)} after refresh");
+            Log.Info($"Claude resolved credential from {SourceLabel(retryCred.Credential.Source)} after refresh");
             result = await FetchUsageWithFallbackAsync(retryCred.Credential.AccessToken, ct);
         }
 
@@ -142,7 +142,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             cd = cd <= OauthCooldownLadder[^1] ? cd : OauthCooldownLadder[^1];
             _oauthCooldownUntil = DateTimeOffset.UtcNow + cd;
             _oauthRateLimitStreak++;
-            DiagnosticLog.Warn($"Claude oauth/usage rate limited; cooldown {cd.TotalMinutes:0.#} minutes");
+            Log.Warn($"Claude oauth/usage rate limited; cooldown {cd.TotalMinutes:0.#} minutes");
         }
         else if (primary.Snapshot is not null)
         {
@@ -198,7 +198,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         List<CredentialSource> sources = GetCredentialSources().ToList();
         if (sources.Count == 0)
         {
-            DiagnosticLog.Warn("Claude credential resolution found no Windows credentials or running WSL sources");
+            Log.Warn("Claude credential resolution found no Windows credentials or running WSL sources");
             return new(null, Strings.Claude_CredNotFound);
         }
 
@@ -213,14 +213,14 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             ClaudeCredential? credential = ReadCredential(source, out string? error);
             if (credential is null)
             {
-                DiagnosticLog.Warn($"Claude credential read failed from {SourceLabel(source)}: {error ?? "unknown"}");
+                Log.Warn($"Claude credential read failed from {SourceLabel(source)}: {error ?? "unknown"}");
                 lastError = error ?? lastError;
                 continue;
             }
 
             if (IsRejected(credential, rejected))
             {
-                DiagnosticLog.Warn($"Claude credential from {SourceLabel(source)} unchanged after refresh; skipping");
+                Log.Warn($"Claude credential from {SourceLabel(source)} unchanged after refresh; skipping");
                 lastError = Strings.Claude_TokenInvalid;
                 continue;
             }
@@ -228,7 +228,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             if (!IsExpired(credential))
                 return new(credential, null);
 
-            DiagnosticLog.Info($"Claude credential from {SourceLabel(source)} is expired");
+            Log.Info($"Claude credential from {SourceLabel(source)} is expired");
             lastError = Strings.Claude_TokenInvalid;
         }
 
@@ -246,11 +246,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 ClaudeCredential? credential = ReadCredential(source, out string? error);
                 if (credential is not null && !IsExpired(credential) && !IsRejected(credential, rejected))
                 {
-                    DiagnosticLog.Info($"Claude credential refresh succeeded for {SourceLabel(source)}");
+                    Log.Info($"Claude credential refresh succeeded for {SourceLabel(source)}");
                     return new(credential, null);
                 }
 
-                DiagnosticLog.Warn($"Claude credential refresh did not produce usable credentials for {SourceLabel(source)}");
+                Log.Warn($"Claude credential refresh did not produce usable credentials for {SourceLabel(source)}");
                 lastError = error ?? lastError;
             }
         }
@@ -344,7 +344,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         catch (Exception ex)
         {
-            DiagnosticLog.Error($"Claude Windows credential read failed: {ex.Message}");
+            Log.Error($"Claude Windows credential read failed: {ex.Message}");
             error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
             return null;
         }
@@ -362,7 +362,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
         if (!result.Succeeded)
         {
-            DiagnosticLog.Warn($"Claude WSL credential read failed for {distro}: {ProcessSummary(result)}");
+            Log.Warn($"Claude WSL credential read failed for {distro}: {ProcessSummary(result)}");
             error = Strings.Claude_CredNotFound;
             return null;
         }
@@ -380,7 +380,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 || !oauth.TryGetProperty("accessToken", out JsonElement tok)
                 || tok.ValueKind != JsonValueKind.String)
             {
-                DiagnosticLog.Warn($"Claude credential from {SourceLabel(source)} is missing accessToken");
+                Log.Warn($"Claude credential from {SourceLabel(source)} is missing accessToken");
                 error = Strings.Claude_CredMissingToken;
                 return null;
             }
@@ -388,7 +388,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             string? token = tok.GetString();
             if (string.IsNullOrWhiteSpace(token))
             {
-                DiagnosticLog.Warn($"Claude credential from {SourceLabel(source)} has an empty accessToken");
+                Log.Warn($"Claude credential from {SourceLabel(source)} has an empty accessToken");
                 error = Strings.Claude_CredMissingToken;
                 return null;
             }
@@ -401,7 +401,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         catch (Exception ex) when (ex is JsonException or FormatException or OverflowException)
         {
-            DiagnosticLog.Error($"Claude credential parse failed from {SourceLabel(source)}: {ex.Message}");
+            Log.Error($"Claude credential parse failed from {SourceLabel(source)}: {ex.Message}");
             error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
             return null;
         }
@@ -428,7 +428,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 || tc.ValueKind != JsonValueKind.String
                 || string.IsNullOrWhiteSpace(tc.GetString()))
             {
-                DiagnosticLog.Warn("Claude Desktop config has no oauth:tokenCache");
+                Log.Warn("Claude Desktop config has no oauth:tokenCache");
                 error = Strings.Claude_CredNotFound;
                 return null;
             }
@@ -441,7 +441,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         catch (Exception ex)
         {
-            DiagnosticLog.Error($"Claude Desktop credential read failed: {ex.Message}");
+            Log.Error($"Claude Desktop credential read failed: {ex.Message}");
             error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
             return null;
         }
@@ -459,7 +459,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 || !osc.TryGetProperty("encrypted_key", out JsonElement ek)
                 || ek.ValueKind != JsonValueKind.String)
             {
-                DiagnosticLog.Warn("Claude Desktop Local State missing os_crypt.encrypted_key");
+                Log.Warn("Claude Desktop Local State missing os_crypt.encrypted_key");
                 error = Strings.Claude_CredNotFound;
                 return null;
             }
@@ -471,7 +471,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         catch (Exception ex)
         {
-            DiagnosticLog.Error($"Claude Desktop OSCrypt key load failed: {ex.Message}");
+            Log.Error($"Claude Desktop OSCrypt key load failed: {ex.Message}");
             error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
             return null;
         }
@@ -503,7 +503,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         catch (Exception ex)
         {
-            DiagnosticLog.Error($"Claude Desktop OSCrypt decrypt failed: {ex.Message}");
+            Log.Error($"Claude Desktop OSCrypt decrypt failed: {ex.Message}");
             error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
             return null;
         }
@@ -554,7 +554,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
             if (!found)
             {
-                DiagnosticLog.Warn("Claude Desktop tokenCache has no usable token entry");
+                Log.Warn("Claude Desktop tokenCache has no usable token entry");
                 error = Strings.Claude_CredMissingToken;
                 return null;
             }
@@ -564,12 +564,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             // The oauth/usage and messages endpoints are Claude Code-scoped; a token
             // from a non-code Desktop entry may be rejected (401) even when valid.
             // Logging the chosen scope makes such a rejection attributable.
-            DiagnosticLog.Info($"Claude Desktop selected token scope: {(bestIsClaudeCode ? "claude_code" : "non-code")}");
+            Log.Info($"Claude Desktop selected token scope: {(bestIsClaudeCode ? "claude_code" : "non-code")}");
             return new ClaudeCredential(token, expiresAt, source);
         }
         catch (Exception ex) when (ex is JsonException or FormatException or OverflowException)
         {
-            DiagnosticLog.Error($"Claude Desktop credential parse failed: {ex.Message}");
+            Log.Error($"Claude Desktop credential parse failed: {ex.Message}");
             error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
             return null;
         }
@@ -596,7 +596,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 break;
             case DesktopCredentialSource:
                 // No CLI to drive; Claude Desktop refreshes its own token while running.
-                DiagnosticLog.Info("Claude Desktop has no refresh path; relying on the app's own token rotation");
+                Log.Info("Claude Desktop has no refresh path; relying on the app's own token rotation");
                 break;
         }
     }
@@ -611,7 +611,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             ? "cmd.exe"
             : claudePath;
 
-        DiagnosticLog.Info($"Attempting Claude Windows token refresh via {Path.GetFileName(claudePath)}");
+        Log.Info($"Attempting Claude Windows token refresh via {Path.GetFileName(claudePath)}");
         ProcessResult result = RunProcess(
             fileName,
             args,
@@ -621,7 +621,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             purpose: "Claude Windows token refresh",
             logSuccess: true);
         if (!result.Succeeded)
-            DiagnosticLog.Warn($"Claude Windows token refresh failed: {ProcessSummary(result)}");
+            Log.Warn($"Claude Windows token refresh failed: {ProcessSummary(result)}");
     }
 
     private static void RefreshWslToken(string distro)
@@ -631,7 +631,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             "elif [ -x \"$HOME/.local/bin/claude\" ]; then \"$HOME/.local/bin/claude\" -p .; " +
             "else exit 127; fi";
 
-        DiagnosticLog.Info($"Attempting Claude WSL token refresh in {distro}");
+        Log.Info($"Attempting Claude WSL token refresh in {distro}");
         ProcessResult result = RunProcess(
             "wsl.exe",
             new[] { "-d", distro, "--", "bash", "-lic", command },
@@ -641,7 +641,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             purpose: $"Claude WSL token refresh ({distro})",
             logSuccess: true);
         if (!result.Succeeded)
-            DiagnosticLog.Warn($"Claude WSL token refresh failed for {distro}: {ProcessSummary(result)}");
+            Log.Warn($"Claude WSL token refresh failed for {distro}: {ProcessSummary(result)}");
     }
 
     private static string ResolveWindowsClaudePath()
@@ -661,13 +661,13 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                     .FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(first))
                 {
-                    DiagnosticLog.Info($"Resolved Claude CLI path for Windows refresh: {Path.GetFileName(first.Trim())}");
+                    Log.Info($"Resolved Claude CLI path for Windows refresh: {Path.GetFileName(first.Trim())}");
                     return first.Trim();
                 }
             }
         }
 
-        DiagnosticLog.Warn("Claude CLI path not found with where.exe; falling back to claude.cmd");
+        Log.Warn("Claude CLI path not found with where.exe; falling back to claude.cmd");
         return "claude.cmd";
     }
 
@@ -686,7 +686,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             if (!result.Succeeded && !_loggedWslListFailure)
             {
                 _loggedWslListFailure = true;
-                DiagnosticLog.Warn($"Unable to list running WSL distros: {ProcessSummary(result)}");
+                Log.Warn($"Unable to list running WSL distros: {ProcessSummary(result)}");
             }
             return Array.Empty<string>();
         }
@@ -817,7 +817,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
-                DiagnosticLog.Warn($"Claude oauth/usage auth error HTTP {(int)resp.StatusCode}");
+                Log.Warn($"Claude oauth/usage auth error HTTP {(int)resp.StatusCode}");
                 return ProviderResult.Auth();
             }
 
@@ -825,13 +825,13 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             {
                 TimeSpan? retryAfter = ReadRetryAfter(resp);
                 string suffix = retryAfter is null ? string.Empty : $" retry-after {retryAfter.Value.TotalSeconds:0.#}s";
-                DiagnosticLog.Warn($"Claude oauth/usage HTTP 429{suffix}");
+                Log.Warn($"Claude oauth/usage HTTP 429{suffix}");
                 return ProviderResult.RateLimit("oauth/usage HTTP 429", retryAfter);
             }
 
             if (!resp.IsSuccessStatusCode)
             {
-                DiagnosticLog.Warn($"Claude oauth/usage HTTP {(int)resp.StatusCode}");
+                Log.Warn($"Claude oauth/usage HTTP {(int)resp.StatusCode}");
                 return ProviderResult.Failed($"oauth/usage HTTP {(int)resp.StatusCode}");
             }
 
@@ -844,7 +844,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         {
             // OperationCanceledException without a canceled token = HttpClient timeout,
             // which we want to treat as a transient network failure, not a crash.
-            DiagnosticLog.Warn($"Claude oauth/usage network error: {ex.Message}");
+            Log.Warn($"Claude oauth/usage network error: {ex.Message}");
             return ProviderResult.Failed(string.Format(Strings.Error_NetworkFormat, ex.Message));
         }
 
@@ -861,7 +861,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         }
         catch (JsonException ex)
         {
-            DiagnosticLog.Error($"Claude oauth/usage parse failed: {ex.Message}");
+            Log.Error($"Claude oauth/usage parse failed: {ex.Message}");
             return ProviderResult.Failed(string.Format(Strings.Error_ParseFormat, ex.Message));
         }
     }
@@ -895,7 +895,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 // OperationCanceledException without a canceled token = HttpClient timeout.
-                DiagnosticLog.Warn($"Claude messages fallback network error for {model}: {ex.Message}");
+                Log.Warn($"Claude messages fallback network error for {model}: {ex.Message}");
                 lastError = string.Format(Strings.Error_NetworkFormat, ex.Message);
                 continue;
             }
@@ -904,7 +904,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             {
                 if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 {
-                    DiagnosticLog.Warn($"Claude messages fallback auth error for {model}: HTTP {(int)resp.StatusCode}");
+                    Log.Warn($"Claude messages fallback auth error for {model}: HTTP {(int)resp.StatusCode}");
                     return ProviderResult.Auth();
                 }
 
@@ -914,12 +914,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 if (fromHeaders is not null)
                     return ProviderResult.Ok(fromHeaders);
 
-                DiagnosticLog.Warn($"Claude messages fallback no rate-limit headers for {model}: HTTP {(int)resp.StatusCode}");
+                Log.Warn($"Claude messages fallback no rate-limit headers for {model}: HTTP {(int)resp.StatusCode}");
                 lastError = string.Format(Strings.Claude_MessagesNoHeaderFormat, model, (int)resp.StatusCode);
             }
         }
 
-        DiagnosticLog.Warn("Claude messages fallback failed for all models");
+        Log.Warn("Claude messages fallback failed for all models");
         return ProviderResult.Failed(lastError ?? Strings.Claude_MessagesFallbackFailed);
     }
 
@@ -1042,7 +1042,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             {
                 var result = new ProcessResult(false, string.Empty, Error: "Process.Start returned null");
                 if (logFailure)
-                    DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+                    Log.Warn($"{purpose} failed: {ProcessSummary(result)}");
                 return result;
             }
 
@@ -1053,7 +1053,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 TryKill(process);
                 var result = new ProcessResult(false, string.Empty, TimedOut: true);
                 if (logFailure)
-                    DiagnosticLog.Warn($"{purpose} timed out after {timeout.TotalSeconds:0.#} seconds");
+                    Log.Warn($"{purpose} timed out after {timeout.TotalSeconds:0.#} seconds");
                 return result;
             }
 
@@ -1063,11 +1063,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             if (completed.Succeeded)
             {
                 if (logSuccess)
-                    DiagnosticLog.Info($"{purpose} succeeded");
+                    Log.Info($"{purpose} succeeded");
             }
             else if (logFailure)
             {
-                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(completed)}");
+                Log.Warn($"{purpose} failed: {ProcessSummary(completed)}");
             }
 
             return completed;
@@ -1076,7 +1076,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         {
             var result = new ProcessResult(false, string.Empty, Error: ex.Message);
             if (logFailure)
-                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+                Log.Warn($"{purpose} failed: {ProcessSummary(result)}");
             return result;
         }
     }
@@ -1107,7 +1107,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             {
                 var result = new ProcessBytesResult(false, Array.Empty<byte>(), Error: "Process.Start returned null");
                 if (logFailure)
-                    DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+                    Log.Warn($"{purpose} failed: {ProcessSummary(result)}");
                 return result;
             }
 
@@ -1119,7 +1119,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider
                 TryKill(process);
                 var result = new ProcessBytesResult(false, Array.Empty<byte>(), TimedOut: true);
                 if (logFailure)
-                    DiagnosticLog.Warn($"{purpose} timed out after {timeout.TotalSeconds:0.#} seconds");
+                    Log.Warn($"{purpose} timed out after {timeout.TotalSeconds:0.#} seconds");
                 return result;
             }
 
@@ -1127,14 +1127,14 @@ public sealed class ClaudeUsageProvider : IUsageProvider
             _ = errorTask.GetAwaiter().GetResult();
             var completed = new ProcessBytesResult(process.ExitCode == 0, output.ToArray(), ExitCode: process.ExitCode);
             if (!completed.Succeeded && logFailure)
-                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(completed)}");
+                Log.Warn($"{purpose} failed: {ProcessSummary(completed)}");
             return completed;
         }
         catch (Exception ex)
         {
             var result = new ProcessBytesResult(false, Array.Empty<byte>(), Error: ex.Message);
             if (logFailure)
-                DiagnosticLog.Warn($"{purpose} failed: {ProcessSummary(result)}");
+                Log.Warn($"{purpose} failed: {ProcessSummary(result)}");
             return result;
         }
     }

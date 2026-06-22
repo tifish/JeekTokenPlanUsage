@@ -1,6 +1,6 @@
 # Cursor 用量获取
 
-实现：[CursorUsageProvider.cs](../CursorUsageProvider.cs)
+实现：[CursorUsageProvider.cs](../JeekTokenPlanUsage/CursorUsageProvider.cs)
 
 ## 数据来源
 
@@ -43,7 +43,7 @@ Cookie: WorkosCursorSessionToken=<userId>%3A%3A<jwt>
 
 只读 `startOfMonth` 字段（ISO 8601 字符串），是订阅锚定日期。
 
-下次重置时间 = 严格大于当前时间的第一个月度周年日。[CursorUsageProvider.cs:111-115](../CursorUsageProvider.cs#L111-L115)
+下次重置时间 = 严格大于当前时间的第一个月度周年日。[CursorUsageProvider.cs:111-115](../JeekTokenPlanUsage/CursorUsageProvider.cs#L111-L115)
 
 主端点 `get-current-period-usage` 本身不返回 reset 时间，所以单独取这个锚点来推算。
 
@@ -67,7 +67,7 @@ WorkosCursorSessionToken=<userId>%3A%3A<jwt>
 - `<userId>` 从 JWT payload 的 `sub` 字段提取，格式 `auth0|USERID`，取 `|` 之后的部分
 - `<jwt>` 整体来自 Cursor IDE 的本地数据库
 
-[CursorUsageProvider.cs:155-164](../CursorUsageProvider.cs#L155-L164) 是组装逻辑。
+[CursorUsageProvider.cs:155-164](../JeekTokenPlanUsage/CursorUsageProvider.cs#L155-L164) 是组装逻辑。
 
 ## 凭据来源：Cursor 的 state.vscdb
 
@@ -95,11 +95,11 @@ SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'
 2. payload 段 Base64Url 解码（`-` → `+`, `_` → `/`, 补 `=`）
 3. 取 `sub`，按 `|` 切出后半段作为 userId
 
-[CursorUsageProvider.cs:197-241](../CursorUsageProvider.cs#L197-L241)
+[CursorUsageProvider.cs:197-241](../JeekTokenPlanUsage/CursorUsageProvider.cs#L197-L241)
 
 ## 响应映射
 
-[CursorUsageProvider.cs:123-143](../CursorUsageProvider.cs#L123-L143)
+[CursorUsageProvider.cs:123-143](../JeekTokenPlanUsage/CursorUsageProvider.cs#L123-L143)
 
 | 程序内字段 | 来源                        | 显示                |
 | ---------- | --------------------------- | ------------------- |
@@ -130,4 +130,4 @@ SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'
 
 ## User-Agent 伪装
 
-构造 `HttpClient` 时使用 Chrome 桌面 UA，避免某些反爬策略对非浏览器 UA 的策略差异。[CursorUsageProvider.cs:32-33](../CursorUsageProvider.cs#L32-L33)
+构造 `HttpClient` 时使用 Chrome 桌面 UA，避免某些反爬策略对非浏览器 UA 的策略差异。[CursorUsageProvider.cs:32-33](../JeekTokenPlanUsage/CursorUsageProvider.cs#L32-L33)

@@ -357,11 +357,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Touch the file first so the shell-launched editor opens an existing
         // file rather than prompting "create new?". Any failure here just falls
         // through to ShellExecute, which will surface the real reason.
-        string path = DiagnosticLog.FilePath;
+        string path = Log.FilePath;
         try
         {
             if (!File.Exists(path))
-                DiagnosticLog.Info("Log file opened from tray menu");
+                Log.Info("Log file opened from tray menu");
         }
         catch { }
 
@@ -438,11 +438,11 @@ public sealed class TrayApplicationContext : ApplicationContext
 
             if (!refreshClaude && !refreshCodex && !refreshCursor)
             {
-                DiagnosticLog.Info($"Skipping refresh on {reason}; all providers polled within base interval");
+                Log.Info($"Skipping refresh on {reason}; all providers polled within base interval");
                 return;
             }
 
-            DiagnosticLog.Info(
+            Log.Info(
                 $"Forcing refresh on {reason} (claude={refreshClaude}, codex={refreshCodex}, cursor={refreshCursor})");
             if (refreshClaude)
                 _ = RefreshClaudeAsync(force: true);
@@ -767,7 +767,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 if (!_claudeIdlePaused)
                 {
                     _claudeIdlePaused = true;
-                    DiagnosticLog.Info("Claude polling paused while user is idle or workstation is locked");
+                    Log.Info("Claude polling paused while user is idle or workstation is locked");
                 }
 
                 _claudeTimer.Interval = ToTimerInterval(IdleCheckInterval);
@@ -777,7 +777,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (_claudeIdlePaused)
             {
                 _claudeIdlePaused = false;
-                DiagnosticLog.Info("Claude polling resumed after user activity");
+                Log.Info("Claude polling resumed after user activity");
             }
 
             if (_claudeAuthPaused && !force)
@@ -789,7 +789,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                     return;
                 }
 
-                DiagnosticLog.Info("Claude credential signature changed; resuming auth polling");
+                Log.Info("Claude credential signature changed; resuming auth polling");
                 _claudeAuthPaused = false;
             }
 
@@ -808,7 +808,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _claudeFastPollsRemaining = 0;
                 _claudeAuthCredentialSignature = await Task.Run(ClaudeUsageProvider.CredentialWatchSignature);
                 _claudeTimer.Interval = _baseIntervalMs;
-                DiagnosticLog.Warn("Claude auth polling paused until credentials change");
+                Log.Warn("Claude auth polling paused until credentials change");
                 NotifyClaudeAuthErrorOnce();
             }
             else
@@ -911,7 +911,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             shown = _anchor.ShowNotification(Strings.Claude_AuthRequiredTitle, Strings.Claude_AuthRequiredBody);
 
         if (!shown)
-            DiagnosticLog.Warn("Claude auth notification was not shown because no tray icon was available");
+            Log.Warn("Claude auth notification was not shown because no tray icon was available");
     }
 
     private void ResetClaudeAuthState()
@@ -933,7 +933,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 if (!_codexIdlePaused)
                 {
                     _codexIdlePaused = true;
-                    DiagnosticLog.Info("Codex polling paused while user is idle or workstation is locked");
+                    Log.Info("Codex polling paused while user is idle or workstation is locked");
                 }
 
                 _codexTimer.Interval = ToTimerInterval(IdleCheckInterval);
@@ -943,7 +943,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (_codexIdlePaused)
             {
                 _codexIdlePaused = false;
-                DiagnosticLog.Info("Codex polling resumed after user activity");
+                Log.Info("Codex polling resumed after user activity");
             }
 
             if (_codexAuthPaused && !force)
@@ -955,7 +955,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                     return;
                 }
 
-                DiagnosticLog.Info("Codex credential signature changed; resuming auth polling");
+                Log.Info("Codex credential signature changed; resuming auth polling");
                 _codexAuthPaused = false;
             }
 
@@ -973,7 +973,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _codexRetryCount = 0;
                 _codexAuthCredentialSignature = await Task.Run(CodexUsageProvider.CredentialWatchSignature);
                 _codexTimer.Interval = _baseIntervalMs;
-                DiagnosticLog.Warn("Codex auth polling paused until credentials change");
+                Log.Warn("Codex auth polling paused until credentials change");
                 NotifyCodexAuthErrorOnce();
             }
             else
@@ -1018,7 +1018,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             shown = _anchor.ShowNotification(Strings.Codex_AuthRequiredTitle, Strings.Codex_AuthRequiredBody);
 
         if (!shown)
-            DiagnosticLog.Warn("Codex auth notification was not shown because no tray icon was available");
+            Log.Warn("Codex auth notification was not shown because no tray icon was available");
     }
 
     private void ResetCodexAuthState()
@@ -1056,7 +1056,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _updateInProgress = true;
         try
         {
-            DiagnosticLog.Info($"AutoUpdate check started (manual={manual})");
+            Log.Info($"AutoUpdate check started (manual={manual})");
             UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync(_settings.DisableMirrorDownload);
             if (_disposed)
                 return;
@@ -1098,7 +1098,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            DiagnosticLog.Error($"AutoUpdate check threw: {ex.Message}");
+            Log.Error($"AutoUpdate check threw: {ex.Message}");
             if (manual)
             {
                 ShowUpdateToast(
@@ -1123,7 +1123,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             return;
         if (_settings.ShowCursor && _cursorIcons.ShowNotification(title, body))
             return;
-        DiagnosticLog.Warn("AutoUpdate toast had no visible tray icon to surface through");
+        Log.Warn("AutoUpdate toast had no visible tray icon to surface through");
     }
 
     private void HandleLeftClick()

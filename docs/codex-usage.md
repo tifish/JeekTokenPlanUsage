@@ -1,6 +1,6 @@
 # Codex 用量获取
 
-实现：[CodexUsageProvider.cs](../CodexUsageProvider.cs)
+实现：[CodexUsageProvider.cs](../JeekTokenPlanUsage/CodexUsageProvider.cs)
 
 ## 数据来源
 
@@ -56,7 +56,7 @@ codex exec .
 
 ## 为什么 shell out 到 curl
 
-[CodexUsageProvider.cs:7-11](../CodexUsageProvider.cs#L7-L11)
+[CodexUsageProvider.cs:7-11](../JeekTokenPlanUsage/CodexUsageProvider.cs#L7-L11)
 
 `chatgpt.com` 走 Cloudflare bot 保护，会基于 TLS 指纹拒掉 .NET 的 `HttpClient`。系统自带的 `curl.exe` 能通过，所以这里用 `Process.Start` 调起 curl。
 
@@ -64,7 +64,7 @@ codex exec .
 - Token 不出现在命令行参数里，避免在 `ps`/任务管理器中泄露
 - 配置末尾的 `write-out = "\nHTTPSTATUS:%{http_code}"` 让 HTTP 状态码追加在 stdout 末尾，供后续解析
 
-[CodexUsageProvider.cs:50-64](../CodexUsageProvider.cs#L50-L64) 是 config 生成；[CodexUsageProvider.cs:107-116](../CodexUsageProvider.cs#L107-L116) 是状态码切分。
+[CodexUsageProvider.cs:50-64](../JeekTokenPlanUsage/CodexUsageProvider.cs#L50-L64) 是 config 生成；[CodexUsageProvider.cs:107-116](../JeekTokenPlanUsage/CodexUsageProvider.cs#L107-L116) 是状态码切分。
 
 ## curl 解析
 
@@ -79,13 +79,13 @@ HTTPSTATUS:200
 
 ## 取消处理
 
-[CodexUsageProvider.cs:94-102](../CodexUsageProvider.cs#L94-L102)
+[CodexUsageProvider.cs:94-102](../JeekTokenPlanUsage/CodexUsageProvider.cs#L94-L102)
 
 `WaitForExitAsync(ct)` 被取消时 `proc.Kill(entireProcessTree: true)`，确保 curl 子进程不会成为孤儿。
 
 ## curl 查找
 
-[CodexUsageProvider.cs:181-185](../CodexUsageProvider.cs#L181-L185)
+[CodexUsageProvider.cs:181-185](../JeekTokenPlanUsage/CodexUsageProvider.cs#L181-L185)
 
 优先用 `C:\Windows\System32\curl.exe`（Win10+ 自带），找不到就回退到 PATH 里的 `curl.exe`。两者都没有 → 返回"未找到 curl.exe"错误。
 
