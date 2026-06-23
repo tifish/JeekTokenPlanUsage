@@ -49,7 +49,9 @@ anthropic-beta: oauth-2025-04-20
 优先级：
 
 1. Windows CLI: `%USERPROFILE%\.claude\.credentials.json`
-2. Claude Desktop: `%APPDATA%\Claude\config.json`（CLI 没装时的来源）
+2. Claude Desktop:
+   - 经典安装：`%APPDATA%\Claude\config.json`
+   - Store/MSIX 安装：`%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\config.json`
 3. WSL fallback: 只枚举 `wsl.exe -l -q --running` 返回的运行中 distro，读取 `~/.claude/.credentials.json`
 
 ### CLI / WSL 凭据
@@ -68,7 +70,7 @@ anthropic-beta: oauth-2025-04-20
 
 ### Claude Desktop 凭据（无需 CLI）
 
-Claude Desktop 把 OAuth token 存在 `config.json` 的 `oauth:tokenCache` 字段，用 Chromium OSCrypt 加密（值以 `v10` 开头）。解密步骤：
+Claude Desktop 把 OAuth token 存在 `config.json` 的 `oauth:tokenCacheV2` / `oauth:tokenCache` 字段，用 Chromium OSCrypt 加密（值以 `v10` 开头）。程序优先尝试 V2，解析失败时回退到旧字段。解密步骤：
 
 1. 读同目录 `Local State` 的 `os_crypt.encrypted_key`，base64 解码后去掉 `DPAPI` 前缀，用 DPAPI（当前用户）解密得到 AES-256 密钥
 2. `tokenCache` base64 解码后按 `3 字节版本 + 12 字节 nonce + 密文 + 16 字节 GCM tag` 布局，AES-256-GCM 解密得到明文 JSON

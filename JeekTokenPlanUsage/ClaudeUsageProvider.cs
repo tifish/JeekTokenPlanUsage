@@ -51,19 +51,23 @@ public sealed class ClaudeUsageProvider : IUsageProvider
 
     // Claude Desktop stores its OAuth token (encrypted with Chromium OSCrypt) in
     // config.json, with the AES key kept DPAPI-protected in the sibling "Local State".
-    private static readonly string DesktopConfigPath =
+    private static readonly string ClassicDesktopConfigPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Claude", "config.json");
+    private static readonly string DesktopPackageRoot =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Packages");
 
     public static bool HasLocalCredentials() =>
-        File.Exists(CredentialsPath) || File.Exists(DesktopConfigPath) || ListWslDistros().Any(ReadWslCredentialsExists);
+        File.Exists(CredentialsPath) || DesktopConfigPaths().Any(File.Exists) || ListWslDistros().Any(ReadWslCredentialsExists);
 
     public static string CredentialWatchSignature()
     {
         var parts = new List<string>
         {
             WindowsCredentialWatchSignature(CredentialsPath),
-            DesktopCredentialWatchSignature(DesktopConfigPath),
         };
+        foreach (string path in DesktopConfigPaths())
+            parts.Add(DesktopCredentialWatchSignature(path));
+
         foreach (string distro in ListWslDistros())
             parts.Add(WslCredentialWatchSignature(distro));
 
@@ -308,11 +312,44 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         if (File.Exists(CredentialsPath))
             yield return new WindowsCredentialSource(CredentialsPath);
 
-        if (File.Exists(DesktopConfigPath))
-            yield return new DesktopCredentialSource(DesktopConfigPath);
+        foreach (string path in DesktopConfigPaths())
+        {
+            if (File.Exists(path))
+                yield return new DesktopCredentialSource(path);
+        }
 
         foreach (string distro in ListWslDistros())
             yield return new WslCredentialSource(distro);
+    }
+
+    private static IEnumerable<string> DesktopConfigPaths()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string path in DesktopConfigPathCandidates())
+        {
+            if (seen.Add(path))
+                yield return path;
+        }
+    }
+
+    private static IEnumerable<string> DesktopConfigPathCandidates()
+    {
+        yield return ClassicDesktopConfigPath;
+
+        string[] packageDirs;
+        try
+        {
+            packageDirs = Directory.Exists(DesktopPackageRoot)
+                ? Directory.GetDirectories(DesktopPackageRoot, "Claude_*")
+                : Array.Empty<string>();
+        }
+        catch
+        {
+            packageDirs = Array.Empty<string>();
+        }
+
+        foreach (string dir in packageDirs)
+            yield return Path.Combine(dir, "LocalCache", "Roaming", "Claude", "config.json");
     }
 
     private static ClaudeCredential? ReadCredential(CredentialSource source, out string? error)
@@ -321,8 +358,23 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         // Desktop stores an encrypted token in a different shape, so it parses separately.
         if (source is DesktopCredentialSource desktop)
         {
-            string? plain = ReadDesktopCredentialJson(desktop.ConfigPath, out error);
-            return plain is null ? null : ParseDesktopCredential(plain, source, out error);
+            List<(string CacheName, string Json)> cacheJsons = ReadDesktopCredentialJsons(desktop.ConfigPath, out error);
+            string? lastError = error;
+            foreach ((string cacheName, string cacheJson) in cacheJsons)
+            {
+                ClaudeCredential? credential = ParseDesktopCredential(cacheJson, source, out string? parseError);
+                if (credential is not null)
+                {
+                    Log.Info($"Claude Desktop selected token cache: {cacheName}");
+                    error = null;
+                    return credential;
+                }
+
+                lastError = parseError ?? lastError;
+            }
+
+            error = lastError ?? error;
+            return null;
         }
 
         string? json = source switch
@@ -417,34 +469,53 @@ public sealed class ClaudeUsageProvider : IUsageProvider
         return null;
     }
 
-    // Reads config.json, pulls oauth:tokenCache, and decrypts it with the OSCrypt key.
-    private static string? ReadDesktopCredentialJson(string configPath, out string? error)
+    // Reads config.json, pulls OAuth token caches, and decrypts them with the OSCrypt key.
+    private static List<(string CacheName, string Json)> ReadDesktopCredentialJsons(string configPath, out string? error)
     {
         error = null;
+        var results = new List<(string CacheName, string Json)>();
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
-            if (!doc.RootElement.TryGetProperty("oauth:tokenCache", out JsonElement tc)
-                || tc.ValueKind != JsonValueKind.String
-                || string.IsNullOrWhiteSpace(tc.GetString()))
-            {
-                Log.Warn("Claude Desktop config has no oauth:tokenCache");
-                error = Strings.Claude_CredNotFound;
-                return null;
-            }
-
             byte[]? key = LoadOsCryptKey(configPath, out error);
             if (key is null)
-                return null;
+                return results;
 
-            return DecryptOsCrypt(tc.GetString()!, key, out error);
+            string? lastError = null;
+            foreach (string property in new[] { "oauth:tokenCacheV2", "oauth:tokenCache" })
+            {
+                if (!doc.RootElement.TryGetProperty(property, out JsonElement tc)
+                    || tc.ValueKind != JsonValueKind.String
+                    || string.IsNullOrWhiteSpace(tc.GetString()))
+                    continue;
+
+                string? plain = DecryptOsCrypt(tc.GetString()!, key, out string? decryptError);
+                if (plain is not null)
+                    results.Add((property, plain));
+                else
+                    lastError = decryptError ?? lastError;
+            }
+
+            if (results.Count == 0)
+            {
+                if (lastError is null)
+                {
+                    Log.Warn("Claude Desktop config has no OAuth token cache");
+                    error = Strings.Claude_CredNotFound;
+                }
+                else
+                {
+                    error = lastError;
+                }
+            }
         }
         catch (Exception ex)
         {
             Log.Error($"Claude Desktop credential read failed: {ex.Message}");
             error = string.Format(Strings.Claude_ReadCredFailedFormat, ex.Message);
-            return null;
         }
+
+        return results;
     }
 
     // Loads the AES-256 key from the sibling "Local State": base64 -> strip "DPAPI" -> DPAPI unprotect.
