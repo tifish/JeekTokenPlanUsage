@@ -18,6 +18,8 @@ public static class IconRenderer
     private static readonly Color White = Color.FromArgb(255, 255, 255);
     private static readonly Color WarnAmber = Color.FromArgb(255, 214, 10);
     private static readonly Color ErrorFrame = Color.FromArgb(120, 120, 120);
+    private static readonly Color PauseBadgeBackground = Color.FromArgb(230, 0, 0, 0);
+    private static readonly Color PauseBadgeFrame = Color.FromArgb(210, 255, 255, 255);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -26,7 +28,12 @@ public static class IconRenderer
     /// Builds an icon whose colored frame identifies the provider/window; the interior
     /// is transparent and the number is drawn white (or red when usage is high) so it
     /// stays legible. The caller owns the returned Icon and must dispose it.
-    public static Icon Render(Color frameColor, double? percent, bool isError, string placeholder = "--")
+    public static Icon Render(
+        Color frameColor,
+        double? percent,
+        bool isError,
+        string placeholder = "--",
+        bool isPaused = false)
     {
         string text;
         Color textColor;
@@ -55,6 +62,8 @@ public static class IconRenderer
             DrawNumberBackground(g);
             DrawFrame(g, frameColor);
             DrawNumber(g, text, textColor);
+            if (isPaused)
+                DrawPauseBadge(g);
         }
 
         IntPtr hIcon = bmp.GetHicon();
@@ -85,6 +94,27 @@ public static class IconRenderer
             new RectangleF(inset, inset, Size - inset * 2, Size - inset * 2), Size * 0.16f);
         using var brush = new SolidBrush(NumberBackground);
         g.FillPath(brush, path);
+    }
+
+    private static void DrawPauseBadge(Graphics g)
+    {
+        const float badgeSize = 18f;
+        RectangleF badge = new(Size - badgeSize - 2f, 2f, badgeSize, badgeSize);
+        using var badgeBrush = new SolidBrush(PauseBadgeBackground);
+        using var badgePen = new Pen(PauseBadgeFrame, 1.4f);
+        g.FillEllipse(badgeBrush, badge);
+        g.DrawEllipse(badgePen, badge);
+
+        const float barWidth = 3.3f;
+        const float barHeight = 9.8f;
+        const float gap = 3.2f;
+        float x = badge.X + (badge.Width - barWidth * 2f - gap) / 2f;
+        float y = badge.Y + (badge.Height - barHeight) / 2f;
+        using var barBrush = new SolidBrush(White);
+        using GraphicsPath left = RoundedRect(new RectangleF(x, y, barWidth, barHeight), 1.3f);
+        using GraphicsPath right = RoundedRect(new RectangleF(x + barWidth + gap, y, barWidth, barHeight), 1.3f);
+        g.FillPath(barBrush, left);
+        g.FillPath(barBrush, right);
     }
 
     private const float GlyphEm = 64f;

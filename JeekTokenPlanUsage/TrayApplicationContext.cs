@@ -51,6 +51,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private static readonly Guid CodexSecondaryGuid = new("1d7bd7f9-da62-4c65-8127-a198d80fbe96");
     private static readonly Guid CursorPrimaryGuid = new("34c0a3e5-d659-4612-bfb0-8c9470d65304");
     private static readonly Guid CursorSecondaryGuid = new("39ce63d9-34ad-4ccc-85ee-4a97070cc2aa");
+    private static readonly Color AnchorFrameColor = Color.FromArgb(100, 100, 100);
 
     private readonly ProviderIcons _claudeIcons;
     private readonly ProviderIcons _codexIcons;
@@ -181,7 +182,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             onLeftClick
         );
 
-        _anchorIcon = IconRenderer.Render(Color.FromArgb(100, 100, 100), null, isError: true, placeholder: "T");
+        _anchorIcon = IconRenderer.Render(AnchorFrameColor, null, isError: true, placeholder: "T");
         _anchor = new TrayIcon(AnchorGuid, menu)
         {
             Icon = _anchorIcon,
@@ -542,14 +543,22 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    // Reflect the paused state on the tray surfaces: append a "(Paused)" marker
-    // to each provider's tooltip and the anchor's, so a frozen icon reads as
+    // Reflect the paused state on the tray surfaces, so a frozen icon reads as
     // intentionally paused rather than merely stale.
     private void ApplyPausedVisuals()
     {
         _claudeIcons.SetPaused(_paused);
         _codexIcons.SetPaused(_paused);
         _cursorIcons.SetPaused(_paused);
+        Icon rendered = IconRenderer.Render(
+            AnchorFrameColor,
+            null,
+            isError: true,
+            placeholder: "T",
+            isPaused: _paused);
+        _anchor.Icon = rendered;
+        _anchorIcon?.Dispose();
+        _anchorIcon = rendered;
         _anchor.Text = _paused
             ? "JeekTokenPlanUsage" + Strings.Tray_PausedSuffix
             : "JeekTokenPlanUsage";
@@ -1501,10 +1510,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             RenderState(snap);
         }
 
-        // Re-render tooltips to add/remove the paused marker. Icon images keep
-        // their last value — pausing freezes the data, it doesn't blank it. With
-        // no snapshot yet (cold start while paused) fall back to the loading
-        // tooltip plus the marker so the icon still reads as paused.
+        // Re-render icons and tooltips to add/remove the paused marker. The
+        // metric value stays frozen while paused; only the status overlay changes.
         public void SetPaused(bool paused)
         {
             _paused = paused;
@@ -1514,6 +1521,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             }
             else
             {
+                ApplyPlaceholderIcons();
                 string text = paused
                     ? Strings.Tray_Loading + Strings.Tray_PausedSuffix
                     : Strings.Tray_Loading;
@@ -1592,18 +1600,36 @@ public sealed class TrayApplicationContext : ApplicationContext
             Icon rendered = IconRenderer.Render(
                 spec.Bg,
                 metric?.Utilization,
-                error || metric is null
+                error || metric is null,
+                isPaused: _paused
             );
             // Push the new handle to the shell first, then release the old one —
             // otherwise the shell would briefly hold a freed HICON.
-            target.Icon = rendered;
-            current?.Dispose();
-            current = rendered;
+            ReplaceIcon(target, ref current, rendered);
 
             target.Text = Truncate(_paused ? tooltip + Strings.Tray_PausedSuffix : tooltip);
 
             if (!error && metric is not null)
                 CheckThresholds(target, spec, metric, thresholdState);
+        }
+
+        private void ApplyPlaceholderIcons()
+        {
+            ReplaceIcon(
+                _primary,
+                ref _primaryIcon,
+                IconRenderer.Render(_primarySpec.Bg, null, isError: true, isPaused: _paused));
+            ReplaceIcon(
+                _secondary,
+                ref _secondaryIcon,
+                IconRenderer.Render(_secondarySpec.Bg, null, isError: true, isPaused: _paused));
+        }
+
+        private static void ReplaceIcon(TrayIcon target, ref Icon? current, Icon rendered)
+        {
+            target.Icon = rendered;
+            current?.Dispose();
+            current = rendered;
         }
 
         // Each (window, threshold) fires at most once per window cycle. We treat
