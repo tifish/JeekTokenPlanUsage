@@ -57,6 +57,21 @@
   <data name="Menu_ShowTaskbarWidget" xml:space="preserve">
     <value>Show widget on taskbar</value>
   </data>
+  <data name="Menu_StorageMode" xml:space="preserve">
+    <value>Settings storage</value>
+  </data>
+  <data name="Menu_StorageAppData" xml:space="preserve">
+    <value>AppData (roaming)</value>
+  </data>
+  <data name="Menu_StoragePortable" xml:space="preserve">
+    <value>Portable</value>
+  </data>
+  <data name="Menu_StorageCustom" xml:space="preserve">
+    <value>Custom folder</value>
+  </data>
+  <data name="Menu_StorageChooseCustom" xml:space="preserve">
+    <value>Choose custom folder...</value>
+  </data>
   <data name="Menu_OpenLog" xml:space="preserve">
     <value>Open log file</value>
   </data>
@@ -101,6 +116,12 @@
   </data>
   <data name="Proxy_Cancel" xml:space="preserve">
     <value>Cancel</value>
+  </data>
+  <data name="Storage_SelectCustomFolder" xml:space="preserve">
+    <value>Choose the folder that should contain the Config directory.</value>
+  </data>
+  <data name="Storage_SwitchFailedFormat" xml:space="preserve">
+    <value>Failed to switch settings storage: {0}</value>
   </data>
   <data name="About_VersionFormat" xml:space="preserve">
     <value>Build {0}</value>

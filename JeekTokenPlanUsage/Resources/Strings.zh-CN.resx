@@ -57,6 +57,21 @@
   <data name="Menu_ShowTaskbarWidget" xml:space="preserve">
     <value>在任务栏显示组件</value>
   </data>
+  <data name="Menu_StorageMode" xml:space="preserve">
+    <value>设置存储</value>
+  </data>
+  <data name="Menu_StorageAppData" xml:space="preserve">
+    <value>默认 (AppData)</value>
+  </data>
+  <data name="Menu_StoragePortable" xml:space="preserve">
+    <value>便携</value>
+  </data>
+  <data name="Menu_StorageCustom" xml:space="preserve">
+    <value>自定义目录</value>
+  </data>
+  <data name="Menu_StorageChooseCustom" xml:space="preserve">
+    <value>选择自定义目录...</value>
+  </data>
   <data name="Menu_OpenLog" xml:space="preserve">
     <value>打开日志文件</value>
   </data>
@@ -101,6 +116,12 @@
   </data>
   <data name="Proxy_Cancel" xml:space="preserve">
     <value>取消</value>
+  </data>
+  <data name="Storage_SelectCustomFolder" xml:space="preserve">
+    <value>请选择用于存放 Config 目录的文件夹。</value>
+  </data>
+  <data name="Storage_SwitchFailedFormat" xml:space="preserve">
+    <value>切换设置存储失败：{0}</value>
   </data>
   <data name="About_VersionFormat" xml:space="preserve">
     <value>构建 {0}</value>

@@ -116,6 +116,11 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _languageAutoItem = null!;
     private ToolStripMenuItem _notifyItem = null!;
     private ToolStripMenuItem _widgetItem = null!;
+    private ToolStripMenuItem _storageParent = null!;
+    private ToolStripMenuItem _storageAppDataItem = null!;
+    private ToolStripMenuItem _storagePortableItem = null!;
+    private ToolStripMenuItem _storageCustomItem = null!;
+    private ToolStripMenuItem _storageChooseCustomItem = null!;
     private ToolStripMenuItem _openLogItem = null!;
     private ToolStripMenuItem _checkUpdateItem = null!;
     private ToolStripMenuItem _autoUpdateItem = null!;
@@ -125,9 +130,12 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem _exitItem = null!;
 
     private readonly WinTimer _updateTimer;
+    private readonly WinTimer _settingsReloadTimer;
+    private FileSystemWatcher? _settingsWatcher;
     private bool _updateInProgress;
     private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(1);
     private static readonly TimeSpan UpdateInitialDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SettingsReloadDelay = TimeSpan.FromSeconds(10);
 
     public TrayApplicationContext()
     {
@@ -228,7 +236,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         WireIconDisplayMenu();
         WireIntervalMenu();
         WireLanguageMenu();
+        WireStorageMenu();
         WireProxyMenu();
+        _settingsReloadTimer = new WinTimer { Interval = (int)SettingsReloadDelay.TotalMilliseconds };
+        _settingsReloadTimer.Tick += (_, _) =>
+        {
+            _settingsReloadTimer.Stop();
+            ReloadSettingsFromDisk();
+        };
+        StartSettingsWatcher();
         ApplyTimers();
 
         _pauseItem.Checked = _paused;
@@ -400,6 +416,141 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _settings.TaskbarWidgetOffset = offset;
         _settings.Save();
+    }
+
+    private void StartSettingsWatcher()
+    {
+        _settingsWatcher?.Dispose();
+        _settingsWatcher = null;
+
+        try
+        {
+            Directory.CreateDirectory(_settings.RoamingConfigDirectory);
+            var watcher = new FileSystemWatcher(_settings.RoamingConfigDirectory)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName
+                    | NotifyFilters.DirectoryName
+                    | NotifyFilters.LastWrite
+                    | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            watcher.Changed += OnSettingsDirectoryChanged;
+            watcher.Created += OnSettingsDirectoryChanged;
+            watcher.Deleted += OnSettingsDirectoryChanged;
+            watcher.Renamed += OnSettingsDirectoryChanged;
+            _settingsWatcher = watcher;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Settings watcher could not start: {ex.Message}");
+        }
+    }
+
+    private void OnSettingsDirectoryChanged(object sender, FileSystemEventArgs e)
+    {
+        if (_disposed)
+            return;
+
+        _uiContext?.Post(_ =>
+        {
+            if (_disposed)
+                return;
+            _settingsReloadTimer.Stop();
+            _settingsReloadTimer.Start();
+        }, null);
+    }
+
+    private void ReloadSettingsFromDisk()
+    {
+        if (_disposed)
+            return;
+
+        string previousLanguage = _settings.Language;
+        string previousConfigDirectory = _settings.RoamingConfigDirectory;
+        try
+        {
+            _settings.ReloadFromDisk();
+            AppProxy.Configure(_settings);
+            ApplySettingsFromDisk(previousLanguage);
+            if (!string.Equals(
+                previousConfigDirectory,
+                _settings.RoamingConfigDirectory,
+                StringComparison.OrdinalIgnoreCase))
+                StartSettingsWatcher();
+            Log.Info($"Settings reloaded from {_settings.RoamingSettingsPath}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Settings reload failed: {ex.Message}");
+        }
+    }
+
+    private void ApplySettingsFromDisk(string previousLanguage)
+    {
+        _paused = _settings.Paused;
+        _baseIntervalMs = ClampPollMinutes(_settings.PollMinutes) * 60_000;
+        _claudeRetryCount = 0;
+        _claudeFastPollsRemaining = 0;
+        _codexRetryCount = 0;
+        _claudeTimer.Interval = _baseIntervalMs;
+        _codexTimer.Interval = _baseIntervalMs;
+        _cursorTimer.Interval = _baseIntervalMs;
+
+        _pauseItem.Checked = _paused;
+        _refreshItem.Enabled = !_paused;
+        _checkUpdateItem.Enabled = !_paused;
+        _startupItem.Checked = _settings.RunAtStartup;
+        _showClaudeItem.Checked = _settings.ShowClaude;
+        _showCodexItem.Checked = _settings.ShowCodex;
+        _showCursorItem.Checked = _settings.ShowCursor;
+        _notifyItem.Checked = _settings.EnableThresholdNotifications;
+        _widgetItem.Checked = _settings.ShowTaskbarWidget;
+        _autoUpdateItem.Checked = _settings.AutoUpdate;
+        _taskbarWidget.Visible = _settings.ShowTaskbarWidget;
+
+        UpdateMenuChecks();
+        if (!string.Equals(previousLanguage, _settings.Language, StringComparison.Ordinal))
+        {
+            ApplyUiCulture(_settings.Language);
+            RelocalizeMenu();
+        }
+
+        _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
+        _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
+        _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
+        ApplyPausedVisuals();
+        ApplyTimers();
+        if (_settings.AutoUpdate && !_paused)
+            _updateTimer.Start();
+        else
+            _updateTimer.Stop();
+        UpdateAnchor();
+        UpdateWidget();
+
+        if (!_paused)
+            _ = RefreshAllAsync(forceClaude: true, forceCodex: true);
+    }
+
+    private void UpdateMenuChecks()
+    {
+        foreach (ToolStripItem raw in _iconDisplayParent.DropDownItems)
+            if (raw is ToolStripMenuItem item && item.Tag is IconDisplayMode mode)
+                item.Checked = mode == _settings.IconMode;
+
+        foreach (ToolStripItem raw in _intervalParent.DropDownItems)
+            if (raw is ToolStripMenuItem item && item.Tag is int minutes)
+                item.Checked = minutes == _settings.PollMinutes;
+
+        foreach (ToolStripItem raw in _languageItem.DropDownItems)
+            if (raw is ToolStripMenuItem item && item.Tag is string code)
+                item.Checked = code == _settings.Language;
+
+        foreach (ToolStripItem raw in _proxyParent.DropDownItems)
+            if (raw is ToolStripMenuItem item && item.Tag is ProxyMode mode)
+                item.Checked = mode == _settings.ProxyMode;
+
+        UpdateStorageMenuChecks();
     }
 
     // Fired (on the UI thread) when Windows broadcasts a light/dark switch. Repaint
@@ -629,16 +780,74 @@ public sealed class TrayApplicationContext : ApplicationContext
         _settings.Language = code;
         _settings.Save();
 
-        var culture = string.IsNullOrEmpty(code)
-            ? Program.SystemUiCulture
-            : CultureInfo.GetCultureInfo(code);
-        CultureInfo.DefaultThreadCurrentUICulture = culture;
-        Thread.CurrentThread.CurrentUICulture = culture;
+        ApplyUiCulture(code);
 
         RelocalizeMenu();
         // Tray tooltip text is rebuilt from Strings.* on next refresh tick;
         // trigger one now so the change is immediately visible.
         _ = RefreshAllAsync();
+    }
+
+    private static void ApplyUiCulture(string code)
+    {
+        try
+        {
+            var culture = string.IsNullOrEmpty(code)
+                ? Program.SystemUiCulture
+                : CultureInfo.GetCultureInfo(code);
+            CultureInfo.DefaultThreadCurrentUICulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+        }
+        catch (CultureNotFoundException) { }
+    }
+
+    private void WireStorageMenu()
+    {
+        _storageAppDataItem.Click += (_, _) => SwitchStorageMode(SettingsStorageMode.AppData);
+        _storagePortableItem.Click += (_, _) => SwitchStorageMode(SettingsStorageMode.Portable);
+        _storageCustomItem.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(_settings.CustomStorageRoot))
+                ChooseCustomStorageFolder();
+            else
+                SwitchStorageMode(SettingsStorageMode.Custom, _settings.CustomStorageRoot);
+        };
+        _storageChooseCustomItem.Click += (_, _) => ChooseCustomStorageFolder();
+        UpdateStorageMenuChecks();
+    }
+
+    private void ChooseCustomStorageFolder()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = Strings.Storage_SelectCustomFolder,
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(_settings.CustomStorageRoot)
+                ? _settings.CustomStorageRoot
+                : Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        };
+
+        if (dialog.ShowDialog() == DialogResult.OK)
+            SwitchStorageMode(SettingsStorageMode.Custom, dialog.SelectedPath);
+    }
+
+    private void SwitchStorageMode(SettingsStorageMode mode, string? customRoot = null)
+    {
+        try
+        {
+            _settings.SwitchStorageMode(mode, customRoot);
+            StartSettingsWatcher();
+            UpdateStorageMenuChecks();
+            Log.Info($"Settings storage switched to {_settings.StorageMode}: {_settings.RoamingConfigDirectory}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                string.Format(Strings.Storage_SwitchFailedFormat, ex.Message),
+                "JeekTokenPlanUsage",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
     }
 
     private void WireProxyMenu()
@@ -688,6 +897,24 @@ public sealed class TrayApplicationContext : ApplicationContext
         _ => mode.ToString(),
     };
 
+    private static string StorageModeLabel(SettingsStorageMode mode) => mode switch
+    {
+        SettingsStorageMode.AppData => Strings.Menu_StorageAppData,
+        SettingsStorageMode.Portable => Strings.Menu_StoragePortable,
+        SettingsStorageMode.Custom => Strings.Menu_StorageCustom,
+        _ => mode.ToString(),
+    };
+
+    private void UpdateStorageMenuChecks()
+    {
+        _storageAppDataItem.Checked = _settings.StorageMode == SettingsStorageMode.AppData;
+        _storagePortableItem.Checked = _settings.StorageMode == SettingsStorageMode.Portable;
+        _storageCustomItem.Checked = _settings.StorageMode == SettingsStorageMode.Custom;
+        _storageChooseCustomItem.ToolTipText = string.IsNullOrWhiteSpace(_settings.CustomStorageRoot)
+            ? ""
+            : _settings.CustomStorageRoot;
+    }
+
     private void RelocalizeMenu()
     {
         _pauseItem.Text = Strings.Menu_Pause;
@@ -702,6 +929,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         _languageAutoItem.Text = Strings.Menu_LanguageAuto;
         _notifyItem.Text = Strings.Menu_EnableNotifications;
         _widgetItem.Text = Strings.Menu_ShowTaskbarWidget;
+        _storageParent.Text = Strings.Menu_StorageMode;
+        _storageAppDataItem.Text = StorageModeLabel(SettingsStorageMode.AppData);
+        _storagePortableItem.Text = StorageModeLabel(SettingsStorageMode.Portable);
+        _storageCustomItem.Text = StorageModeLabel(SettingsStorageMode.Custom);
+        _storageChooseCustomItem.Text = Strings.Menu_StorageChooseCustom;
         _proxyParent.Text = Strings.Menu_Proxy;
         _proxyCustomSettingsItem.Text = Strings.Menu_ProxyCustomSettings;
         foreach (ToolStripItem raw in _proxyParent.DropDownItems)
@@ -722,6 +954,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         foreach (ToolStripItem raw in _languageItem.DropDownItems)
             if (raw is ToolStripMenuItem mi && mi.Tag is string code)
                 mi.Checked = (code == _settings.Language);
+        UpdateStorageMenuChecks();
 
         // Re-render the paused marker in the new language. When not paused this
         // is a no-op suffix; the metric text itself is refreshed by the caller.
@@ -780,6 +1013,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         _widgetItem = new ToolStripMenuItem(Strings.Menu_ShowTaskbarWidget);
         _autoUpdateItem = new ToolStripMenuItem(Strings.Menu_AutoUpdate);
 
+        _storageParent = new ToolStripMenuItem(Strings.Menu_StorageMode);
+        _storageAppDataItem = new ToolStripMenuItem(StorageModeLabel(SettingsStorageMode.AppData));
+        _storagePortableItem = new ToolStripMenuItem(StorageModeLabel(SettingsStorageMode.Portable));
+        _storageCustomItem = new ToolStripMenuItem(StorageModeLabel(SettingsStorageMode.Custom));
+        _storageChooseCustomItem = new ToolStripMenuItem(Strings.Menu_StorageChooseCustom);
+        _storageParent.DropDownItems.Add(_storageAppDataItem);
+        _storageParent.DropDownItems.Add(_storagePortableItem);
+        _storageParent.DropDownItems.Add(_storageCustomItem);
+        _storageParent.DropDownItems.Add(new ToolStripSeparator());
+        _storageParent.DropDownItems.Add(_storageChooseCustomItem);
+
         // Proxy mode radios + a dialog for the custom host/port/protocol. The
         // mode items carry their ProxyMode in Tag, mirroring the interval menu.
         _proxyParent = new ToolStripMenuItem(Strings.Menu_Proxy);
@@ -817,6 +1061,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_iconDisplayParent);
         menu.Items.Add(_intervalParent);
         menu.Items.Add(_languageItem);
+        menu.Items.Add(_storageParent);
         menu.Items.Add(_proxyParent);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_checkUpdateItem);
@@ -1344,6 +1589,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _codexTimer.Dispose();
             _cursorTimer.Dispose();
             _updateTimer.Dispose();
+            _settingsReloadTimer.Dispose();
+            _settingsWatcher?.Dispose();
             _claudeIcons.Dispose();
             _codexIcons.Dispose();
             _cursorIcons.Dispose();

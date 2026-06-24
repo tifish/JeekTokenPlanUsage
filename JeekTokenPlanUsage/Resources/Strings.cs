@@ -29,6 +29,11 @@ internal static class Strings
     public static string Menu_LanguageAuto => Get(nameof(Menu_LanguageAuto));
     public static string Menu_EnableNotifications => Get(nameof(Menu_EnableNotifications));
     public static string Menu_ShowTaskbarWidget => Get(nameof(Menu_ShowTaskbarWidget));
+    public static string Menu_StorageMode => Get(nameof(Menu_StorageMode));
+    public static string Menu_StorageAppData => Get(nameof(Menu_StorageAppData));
+    public static string Menu_StoragePortable => Get(nameof(Menu_StoragePortable));
+    public static string Menu_StorageCustom => Get(nameof(Menu_StorageCustom));
+    public static string Menu_StorageChooseCustom => Get(nameof(Menu_StorageChooseCustom));
     public static string Menu_OpenLog => Get(nameof(Menu_OpenLog));
     public static string Menu_CheckForUpdates => Get(nameof(Menu_CheckForUpdates));
     public static string Menu_AutoUpdate => Get(nameof(Menu_AutoUpdate));
@@ -46,6 +51,9 @@ internal static class Strings
     public static string Proxy_Host => Get(nameof(Proxy_Host));
     public static string Proxy_Port => Get(nameof(Proxy_Port));
     public static string Proxy_Cancel => Get(nameof(Proxy_Cancel));
+
+    public static string Storage_SelectCustomFolder => Get(nameof(Storage_SelectCustomFolder));
+    public static string Storage_SwitchFailedFormat => Get(nameof(Storage_SwitchFailedFormat));
 
     public static string About_VersionFormat => Get(nameof(About_VersionFormat));
     public static string About_DevBuild => Get(nameof(About_DevBuild));
