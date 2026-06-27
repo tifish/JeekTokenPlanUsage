@@ -68,7 +68,7 @@ internal sealed class AppSettings
     public IconDisplayMode IconMode { get; set; } = IconDisplayMode.Double;
 
     /// Base polling interval shared by all three providers (minutes). Allowed:
-    /// 1, 5, 10, 30, 60. Claude's poll may hit the messages-API fallback which
+    /// 1, 2, 3, 5, 10. Claude's poll may hit the messages-API fallback which
     /// costs real quota - 1 minute is available but burns quota fast; default
     /// is 5. Codex / Cursor endpoints are free, so they just inherit this.
     public int PollMinutes { get; set; } = 5;

@@ -11,8 +11,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     // Allowed base polling intervals (minutes), shared across all three
     // providers. Claude's fallback path may consume quota at the shorter end;
     // 1 minute is offered for users who accept that cost in exchange for
-    // fresher data.
-    private static readonly int[] AllowedPollMinutes = { 1, 5, 10, 30, 60 };
+    // fresher data. The upper bound stays low: idle pause already covers the
+    // away case, so a stale number adds nothing useful during active use.
+    private static readonly int[] AllowedPollMinutes = { 1, 2, 3, 5, 10 };
 
     // After a successful Claude poll whose returned reset time is already in
     // the past, poll again at this cadence until the API rolls over to a new
