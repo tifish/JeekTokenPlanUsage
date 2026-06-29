@@ -713,12 +713,13 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             isError: true,
             placeholder: "T",
             isPaused: _paused);
-        _anchor.Icon = rendered;
+        _anchor.SetIconAndText(
+            rendered,
+            _paused
+                ? "JeekTokenPlanUsage" + Strings.Tray_PausedSuffix
+                : "JeekTokenPlanUsage");
         _anchorIcon?.Dispose();
         _anchorIcon = rendered;
-        _anchor.Text = _paused
-            ? "JeekTokenPlanUsage" + Strings.Tray_PausedSuffix
-            : "JeekTokenPlanUsage";
     }
 
     private void WireIconDisplayMenu()
@@ -2305,8 +2306,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _notifyEnabled = notifyEnabled;
             _tooltipWindowLabelWidth = Math.Max(primary.Label.Length, secondary.Label.Length);
 
-            // Hold the initial placeholder icons in our own fields so the HICON
-            // stays valid for as long as the shell references it.
+            // Keep the rendered Icon objects tracked so they are disposed when
+            // replaced; TrayIcon owns a separate HICON copy for the shell.
             _primaryIcon = IconRenderer.Render(primary.Bg, null, isError: true);
             _secondaryIcon = IconRenderer.Render(secondary.Bg, null, isError: true);
 
@@ -2364,12 +2365,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             }
             else
             {
-                ApplyPlaceholderIcons();
                 string text = paused
                     ? Strings.Tray_Loading + Strings.Tray_PausedSuffix
                     : Strings.Tray_Loading;
-                _primary.Text = text;
-                _secondary.Text = text;
+                ApplyPlaceholderIcon(_primary, ref _primaryIcon, _primarySpec, text);
+                ApplyPlaceholderIcon(_secondary, ref _secondaryIcon, _secondarySpec, text);
             }
         }
 
@@ -2446,31 +2446,29 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 error || metric is null,
                 isPaused: _paused
             );
-            // Push the new handle to the shell first, then release the old one —
-            // otherwise the shell would briefly hold a freed HICON.
-            ReplaceIcon(target, ref current, rendered);
-
-            target.Text = Truncate(_paused ? tooltip + Strings.Tray_PausedSuffix : tooltip);
+            string text = Truncate(_paused ? tooltip + Strings.Tray_PausedSuffix : tooltip);
+            ReplaceIconAndText(target, ref current, rendered, text);
 
             if (!error && metric is not null)
                 CheckThresholds(target, spec, metric, thresholdState);
         }
 
-        private void ApplyPlaceholderIcons()
+        private void ApplyPlaceholderIcon(
+            TrayIcon target,
+            ref Icon? current,
+            WindowSpec spec,
+            string text)
         {
-            ReplaceIcon(
-                _primary,
-                ref _primaryIcon,
-                IconRenderer.Render(_primarySpec.Bg, null, isError: true, isPaused: _paused));
-            ReplaceIcon(
-                _secondary,
-                ref _secondaryIcon,
-                IconRenderer.Render(_secondarySpec.Bg, null, isError: true, isPaused: _paused));
+            ReplaceIconAndText(
+                target,
+                ref current,
+                IconRenderer.Render(spec.Bg, null, isError: true, isPaused: _paused),
+                text);
         }
 
-        private static void ReplaceIcon(TrayIcon target, ref Icon? current, Icon rendered)
+        private static void ReplaceIconAndText(TrayIcon target, ref Icon? current, Icon rendered, string text)
         {
-            target.Icon = rendered;
+            target.SetIconAndText(rendered, text);
             current?.Dispose();
             current = rendered;
         }

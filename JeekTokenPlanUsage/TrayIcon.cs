@@ -74,6 +74,13 @@ internal sealed class TrayIcon : IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out POINT lpPoint);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr CopyIcon(IntPtr hIcon);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
     private static readonly int WM_TASKBARCREATED = (int)RegisterWindowMessageW("TaskbarCreated");
 
     private readonly Guid _guid;
@@ -81,6 +88,8 @@ internal sealed class TrayIcon : IDisposable
     private readonly MessageWindow _window;
     private readonly uint _uid = 1;
 
+    // Owned HICON copy passed to Shell_NotifyIcon. Callers can dispose or replace
+    // their Icon objects immediately after assignment without invalidating us.
     private IntPtr _hIcon;
     private string _text = string.Empty;
     private bool _visible;
@@ -98,9 +107,16 @@ internal sealed class TrayIcon : IDisposable
     {
         set
         {
-            _hIcon = value?.Handle ?? IntPtr.Zero;
-            if (_added)
-                Modify();
+            IntPtr previous = ReplaceIconHandle(value);
+            try
+            {
+                if (_added)
+                    RefreshRegistration();
+            }
+            finally
+            {
+                DestroyIconHandle(previous);
+            }
         }
     }
 
@@ -108,13 +124,54 @@ internal sealed class TrayIcon : IDisposable
     {
         set
         {
-            // szTip is 128 wchars including null terminator.
-            string v = value ?? string.Empty;
-            if (v.Length > 127) v = v[..127];
-            _text = v;
+            SetText(value);
             if (_added)
-                Modify();
+                RefreshRegistration();
         }
+    }
+
+    public void SetIconAndText(Icon? icon, string text)
+    {
+        IntPtr previous = ReplaceIconHandle(icon);
+        try
+        {
+            SetText(text);
+            if (_added)
+                RefreshRegistration();
+        }
+        finally
+        {
+            DestroyIconHandle(previous);
+        }
+    }
+
+    private void SetText(string? text)
+    {
+        // szTip is 128 wchars including null terminator.
+        string v = text ?? string.Empty;
+        if (v.Length > 127) v = v[..127];
+        _text = v;
+    }
+
+    private IntPtr ReplaceIconHandle(Icon? icon)
+    {
+        IntPtr next = IntPtr.Zero;
+        if (icon is not null)
+        {
+            next = CopyIcon(icon.Handle);
+            if (next == IntPtr.Zero)
+                return IntPtr.Zero;
+        }
+
+        IntPtr previous = _hIcon;
+        _hIcon = next;
+        return previous;
+    }
+
+    private static void DestroyIconHandle(IntPtr hIcon)
+    {
+        if (hIcon != IntPtr.Zero)
+            DestroyIcon(hIcon);
     }
 
     public bool Visible
@@ -175,6 +232,17 @@ internal sealed class TrayIcon : IDisposable
             _added = false;
             Add();
         }
+    }
+
+    private void RefreshRegistration()
+    {
+        // Explorer can keep stale bitmap/tip data for an existing GUID entry even
+        // while callbacks still reach this process. Re-add the same GUID for
+        // visual content changes so the active shell row is rebuilt from _hIcon
+        // and _text. GUID-based position/visibility settings remain the same.
+        Remove();
+        if (_visible)
+            Add();
     }
 
     /// Shows a Windows toast/balloon via Shell_NotifyIcon NIF_INFO. Caps to the
@@ -251,6 +319,11 @@ internal sealed class TrayIcon : IDisposable
         if (_disposed) return;
         _disposed = true;
         Remove();
+        if (_hIcon != IntPtr.Zero)
+        {
+            DestroyIcon(_hIcon);
+            _hIcon = IntPtr.Zero;
+        }
         _window.DestroyHandle();
     }
 
