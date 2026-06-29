@@ -12,6 +12,7 @@ x86/
 !bin/AutoUpdate.ps1
 !bin/Setup.cmd
 !bin/dotnet-install.ps1
+!bin/MCP.md
 
 # Publish artifacts
 *.7z

@@ -6,7 +6,7 @@ using WinTimer = System.Windows.Forms.Timer;
 
 namespace JeekTokenPlanUsage;
 
-public sealed class TrayApplicationContext : ApplicationContext
+public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 {
     // Allowed base polling intervals (minutes), shared across all three
     // providers. Claude's fallback path may consume quota at the shorter end;
@@ -68,6 +68,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly DetailsForm _detailsForm;
     private readonly TaskbarWidget _taskbarWidget;
     private readonly SystemChangeListener _systemChangeListener;
+    private readonly McpHttpServer _mcpServer;
     private readonly SynchronizationContext? _uiContext;
 
     // Track when each provider was last polled, so a wake/unlock event can skip
@@ -374,6 +375,9 @@ public sealed class TrayApplicationContext : ApplicationContext
                 await CheckForUpdatesAsync(manual: false);
         };
         initialDelayTimer.Start();
+
+        _mcpServer = new McpHttpServer(this);
+        _mcpServer.Start();
     }
 
     private static void ShowAbout()
@@ -1085,6 +1089,131 @@ public sealed class TrayApplicationContext : ApplicationContext
         await Task.WhenAll(tasks);
     }
 
+    Task<McpUsageState> IMcpUsageSource.GetUsageAsync(string? provider, bool refresh, CancellationToken ct) =>
+        InvokeOnUiThreadAsync(() => GetMcpUsageAsync(provider, refresh), ct);
+
+    private async Task<McpUsageState> GetMcpUsageAsync(string? provider, bool refresh)
+    {
+        string? normalizedProvider = NormalizeMcpProvider(provider);
+        if (refresh)
+            await RefreshForMcpAsync(normalizedProvider);
+        return BuildMcpUsageState(normalizedProvider);
+    }
+
+    private async Task RefreshForMcpAsync(string? provider)
+    {
+        switch (provider)
+        {
+            case null:
+                await Task.WhenAll(
+                    RefreshClaudeAsync(force: true),
+                    RefreshCodexAsync(force: true),
+                    RefreshCursorAsync());
+                break;
+
+            case "claude":
+                await RefreshClaudeAsync(force: true);
+                break;
+
+            case "codex":
+                await RefreshCodexAsync(force: true);
+                break;
+
+            case "cursor":
+                await RefreshCursorAsync();
+                break;
+        }
+    }
+
+    private McpUsageState BuildMcpUsageState(string? provider)
+    {
+        var providers = new List<McpProviderState>(3);
+        AddProvider("claude", "Claude", _settings.ShowClaude, _claudeLastPollAt, _claudeSnap);
+        AddProvider("codex", "Codex", _settings.ShowCodex, _codexLastPollAt, _codexSnap);
+        AddProvider("cursor", "Cursor", _settings.ShowCursor, _cursorLastPollAt, _cursorSnap);
+        return new McpUsageState(DateTimeOffset.UtcNow, _paused, providers);
+
+        void AddProvider(
+            string id,
+            string name,
+            bool enabled,
+            DateTimeOffset lastPollAt,
+            UsageSnapshot? snapshot)
+        {
+            if (provider is not null && !provider.Equals(id, StringComparison.Ordinal))
+                return;
+
+            providers.Add(new McpProviderState(
+                id,
+                name,
+                enabled,
+                lastPollAt == DateTimeOffset.MinValue ? null : lastPollAt,
+                snapshot?.Timestamp,
+                snapshot?.Error,
+                snapshot?.ErrorKind?.ToString().ToLowerInvariant(),
+                BuildMcpWindows(id, snapshot)));
+        }
+    }
+
+    private static IReadOnlyList<McpUsageWindow> BuildMcpWindows(string provider, UsageSnapshot? snapshot)
+    {
+        bool cursor = provider == "cursor";
+        return new[]
+        {
+            new McpUsageWindow(
+                cursor ? "auto" : "five_hour",
+                cursor ? "Auto" : "5h",
+                snapshot?.FiveHour?.Utilization,
+                snapshot?.FiveHour?.ResetsAt),
+            new McpUsageWindow(
+                cursor ? "api" : "weekly",
+                cursor ? "API" : "Weekly",
+                snapshot?.Weekly?.Utilization,
+                snapshot?.Weekly?.ResetsAt),
+        };
+    }
+
+    private static string? NormalizeMcpProvider(string? provider)
+    {
+        if (string.IsNullOrWhiteSpace(provider))
+            return null;
+
+        string normalized = provider.Trim().ToLowerInvariant();
+        return normalized is "claude" or "codex" or "cursor"
+            ? normalized
+            : throw new ArgumentException($"Unknown provider: {provider}");
+    }
+
+    private Task<T> InvokeOnUiThreadAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+            return Task.FromCanceled<T>(ct);
+
+        if (_uiContext is null || SynchronizationContext.Current == _uiContext)
+            return action();
+
+        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _uiContext.Post(async _ =>
+        {
+            if (ct.IsCancellationRequested)
+            {
+                tcs.TrySetCanceled(ct);
+                return;
+            }
+
+            try
+            {
+                tcs.TrySetResult(await action());
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        }, null);
+
+        return tcs.Task.WaitAsync(ct);
+    }
+
     private async Task RefreshClaudeAsync(bool force = false)
     {
         if (_claudeBusy || _disposed || _paused)
@@ -1586,6 +1715,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _disposed = true;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.SessionSwitch -= OnSessionSwitch;
+            _mcpServer.Dispose();
             _claudeTimer.Dispose();
             _codexTimer.Dispose();
             _cursorTimer.Dispose();
