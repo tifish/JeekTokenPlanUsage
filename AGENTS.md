@@ -7,6 +7,10 @@
 - Use English for commit messages, keeping them to a brief sentence or two stating the purpose without elaborating on implementation details.
 - Do not copy runtime files from the source directory; keep and version-control them directly under the bin directory.
 
+## MCP Testing
+
+- Use the MCP interface for testing and AI automation. See [bin/MCP.md](bin/MCP.md) and [docs/mcp-http.md](docs/mcp-http.md).
+
 ## 参考
 
 每个 provider 的实现说明见 [docs/](docs/)：

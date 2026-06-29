@@ -65,6 +65,57 @@ Arguments:
 
 The argument is optional. Omit `provider` to refresh all providers.
 
+### `get_ui_state`
+
+Returns the current tray UI and settings state for automation.
+
+The structured result includes:
+
+- `detailsVisible`
+- `anchorVisible`
+- `logPath`
+- `settings`
+- `allowedValues`
+
+### `ui_action`
+
+Invokes a tray-menu-equivalent action on the UI thread.
+
+Arguments:
+
+```json
+{
+  "action": "set_icon_display",
+  "mode": "single"
+}
+```
+
+Supported actions:
+
+| action | Required or useful arguments |
+|---|---|
+| `refresh` | optional `provider` |
+| `set_paused` | `paused` |
+| `set_provider_enabled` | `provider`, `enabled` |
+| `set_icon_display` | `mode`: `none`, `single`, `double` |
+| `set_poll_interval` | `minutes`: `1`, `2`, `3`, `5`, `10` |
+| `set_language` | `language`: `""`, `zh-CN`, `en` |
+| `set_threshold_notifications` | `enabled` |
+| `set_taskbar_widget` | optional `visible`, optional `offset` |
+| `set_startup` | `enabled` |
+| `set_auto_update` | `enabled` |
+| `set_proxy` | `mode`: `direct`, `system`, `custom`; optional `protocol`, `host`, `port` |
+| `set_storage` | `mode`: `appData`, `portable`, `custom`; optional `customRoot` |
+| `show_details` | none |
+| `hide_details` | none |
+| `toggle_details` | none |
+| `open_log` | none |
+| `check_update` | optional `allowUpdateLaunch`, default `false` |
+| `show_about` | none |
+| `exit_app` | none |
+
+`check_update` does not launch the updater unless `allowUpdateLaunch` is `true`, so automated tests can inspect update status safely.
+
 ## Example JSON-RPC Call
 
 ```json

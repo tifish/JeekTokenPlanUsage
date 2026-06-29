@@ -217,6 +217,13 @@ internal sealed class TaskbarWidget : IDisposable
             RefreshVisual();
     }
 
+    public void SetOffset(int offset)
+    {
+        _offset = Math.Max(0, offset);
+        if (_visible)
+            Position();
+    }
+
     /// Re-renders immediately after a system light/dark switch.
     public void NotifyThemeChanged()
     {

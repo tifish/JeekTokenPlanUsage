@@ -70,6 +70,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private readonly SystemChangeListener _systemChangeListener;
     private readonly McpHttpServer _mcpServer;
     private readonly SynchronizationContext? _uiContext;
+    private AboutForm? _aboutForm;
 
     // Track when each provider was last polled, so a wake/unlock event can skip
     // providers whose data is still fresh (within one base poll interval). This
@@ -836,7 +837,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             SwitchStorageMode(SettingsStorageMode.Custom, dialog.SelectedPath);
     }
 
-    private void SwitchStorageMode(SettingsStorageMode mode, string? customRoot = null)
+    private void SwitchStorageMode(SettingsStorageMode mode, string? customRoot = null, bool showErrorDialog = true)
     {
         try
         {
@@ -847,6 +848,9 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         }
         catch (Exception ex)
         {
+            if (!showErrorDialog)
+                throw;
+
             MessageBox.Show(
                 string.Format(Strings.Storage_SwitchFailedFormat, ex.Message),
                 "JeekTokenPlanUsage",
@@ -1092,6 +1096,12 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     Task<McpUsageState> IMcpUsageSource.GetUsageAsync(string? provider, bool refresh, CancellationToken ct) =>
         InvokeOnUiThreadAsync(() => GetMcpUsageAsync(provider, refresh), ct);
 
+    Task<McpUiState> IMcpUsageSource.GetUiStateAsync(CancellationToken ct) =>
+        InvokeOnUiThreadAsync(() => Task.FromResult(BuildMcpUiState()), ct);
+
+    Task<McpUiActionResult> IMcpUsageSource.InvokeUiActionAsync(McpUiActionRequest request, CancellationToken ct) =>
+        InvokeOnUiThreadAsync(() => InvokeMcpUiActionAsync(request), ct);
+
     private async Task<McpUsageState> GetMcpUsageAsync(string? provider, bool refresh)
     {
         string? normalizedProvider = NormalizeMcpProvider(provider);
@@ -1183,6 +1193,460 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             ? normalized
             : throw new ArgumentException($"Unknown provider: {provider}");
     }
+
+    private async Task<McpUiActionResult> InvokeMcpUiActionAsync(McpUiActionRequest request)
+    {
+        string action = request.Action.Trim().ToLowerInvariant();
+        string message;
+
+        switch (action)
+        {
+            case "refresh":
+                await RefreshForMcpAsync(NormalizeMcpProvider(request.Provider));
+                message = "Refresh requested.";
+                break;
+
+            case "set_paused":
+                SetPaused(RequireBool(request.Paused, "paused"));
+                message = $"Paused set to {_paused.ToString().ToLowerInvariant()}.";
+                break;
+
+            case "set_provider_enabled":
+                await SetProviderEnabledForMcpAsync(
+                    NormalizeMcpProvider(RequireString(request.Provider, "provider"))!,
+                    RequireBool(request.Enabled, "enabled"));
+                message = $"Provider {request.Provider} enabled set to {request.Enabled!.Value.ToString().ToLowerInvariant()}.";
+                break;
+
+            case "set_icon_display":
+                SetIconDisplayForMcp(ParseIconDisplayMode(RequireString(request.Mode, "mode")));
+                message = $"Icon display set to {_settings.IconMode}.";
+                break;
+
+            case "set_poll_interval":
+                SetPollIntervalForMcp(RequireInt(request.Minutes, "minutes"));
+                message = $"Poll interval set to {_settings.PollMinutes} minutes.";
+                break;
+
+            case "set_language":
+                SetLanguage(request.Language ?? "");
+                message = string.IsNullOrEmpty(_settings.Language)
+                    ? "Language set to system default."
+                    : $"Language set to {_settings.Language}.";
+                break;
+
+            case "set_threshold_notifications":
+                _settings.EnableThresholdNotifications = RequireBool(request.Enabled, "enabled");
+                _settings.Save();
+                _notifyItem.Checked = _settings.EnableThresholdNotifications;
+                message = $"Threshold notifications set to {_settings.EnableThresholdNotifications.ToString().ToLowerInvariant()}.";
+                break;
+
+            case "set_taskbar_widget":
+                SetTaskbarWidgetForMcp(request.Visible, request.Offset);
+                message = $"Taskbar widget visible={_settings.ShowTaskbarWidget.ToString().ToLowerInvariant()}, offset={_settings.TaskbarWidgetOffset}.";
+                break;
+
+            case "set_startup":
+                _settings.RunAtStartup = RequireBool(request.Enabled, "enabled");
+                _startupItem.Checked = _settings.RunAtStartup;
+                message = $"Run at startup set to {_settings.RunAtStartup.ToString().ToLowerInvariant()}.";
+                break;
+
+            case "set_auto_update":
+                SetAutoUpdateForMcp(RequireBool(request.Enabled, "enabled"));
+                message = $"Auto update set to {_settings.AutoUpdate.ToString().ToLowerInvariant()}.";
+                break;
+
+            case "set_proxy":
+                await SetProxyForMcpAsync(request);
+                message = $"Proxy set to {FormatProxyMode(_settings.ProxyMode)}.";
+                break;
+
+            case "set_storage":
+                SetStorageForMcp(request);
+                message = $"Storage set to {FormatStorageMode(_settings.StorageMode)}.";
+                break;
+
+            case "show_details":
+                ShowDetailsForMcp();
+                message = "Details popup shown.";
+                break;
+
+            case "hide_details":
+                _detailsForm.Hide();
+                message = "Details popup hidden.";
+                break;
+
+            case "toggle_details":
+                if (_detailsForm.Visible)
+                {
+                    _detailsForm.Hide();
+                    message = "Details popup hidden.";
+                }
+                else
+                {
+                    ShowDetailsForMcp();
+                    message = "Details popup shown.";
+                }
+                break;
+
+            case "open_log":
+                OpenLogFile();
+                message = $"Log opened: {Log.FilePath}";
+                break;
+
+            case "check_update":
+                message = await CheckUpdateForMcpAsync(request.AllowUpdateLaunch ?? false);
+                break;
+
+            case "show_about":
+                ShowAboutForMcp();
+                message = "About window shown.";
+                break;
+
+            case "exit_app":
+                ScheduleExitForMcp();
+                message = "Application exit scheduled.";
+                break;
+
+            default:
+                throw new ArgumentException($"Unknown UI action: {request.Action}");
+        }
+
+        return new McpUiActionResult(DateTimeOffset.UtcNow, action, true, message, BuildMcpUiState());
+    }
+
+    private McpUiState BuildMcpUiState() => new(
+        DateTimeOffset.UtcNow,
+        _detailsForm.Visible,
+        _anchor.Visible,
+        Log.FilePath,
+        new McpUiSettings(
+            _paused,
+            _settings.RunAtStartup,
+            _settings.ShowClaude,
+            _settings.ShowCodex,
+            _settings.ShowCursor,
+            FormatIconDisplayMode(_settings.IconMode),
+            _settings.PollMinutes,
+            _settings.Language,
+            _settings.EnableThresholdNotifications,
+            _settings.ShowTaskbarWidget,
+            _settings.TaskbarWidgetOffset,
+            _settings.AutoUpdate,
+            _settings.DisableMirrorDownload,
+            FormatProxyMode(_settings.ProxyMode),
+            _settings.ProxyProtocol,
+            _settings.ProxyHost,
+            _settings.ProxyPort,
+            FormatStorageMode(_settings.StorageMode),
+            _settings.CustomStorageRoot,
+            _settings.RoamingConfigDirectory,
+            _settings.RoamingSettingsPath),
+        new McpUiAllowedValues(
+            new[] { "claude", "codex", "cursor" },
+            new[] { "none", "single", "double" },
+            AllowedPollMinutes,
+            new[] { "", "zh-CN", "en" },
+            new[] { "direct", "system", "custom" },
+            new[] { "socks5", "http" },
+            new[] { "appData", "portable", "custom" },
+            new[]
+            {
+                "refresh",
+                "set_paused",
+                "set_provider_enabled",
+                "set_icon_display",
+                "set_poll_interval",
+                "set_language",
+                "set_threshold_notifications",
+                "set_taskbar_widget",
+                "set_startup",
+                "set_auto_update",
+                "set_proxy",
+                "set_storage",
+                "show_details",
+                "hide_details",
+                "toggle_details",
+                "open_log",
+                "check_update",
+                "show_about",
+                "exit_app",
+            }));
+
+    private async Task SetProviderEnabledForMcpAsync(string provider, bool enabled)
+    {
+        switch (provider)
+        {
+            case "claude":
+                if (_settings.ShowClaude == enabled)
+                    return;
+                _settings.ShowClaude = enabled;
+                _settings.Save();
+                _showClaudeItem.Checked = enabled;
+                _claudeIcons.ApplyMode(EffectiveMode(enabled));
+                if (!enabled)
+                    ResetClaudeAuthState();
+                ApplyTimers();
+                UpdateAnchor();
+                UpdateWidget();
+                if (enabled)
+                    await RefreshClaudeAsync(force: true);
+                break;
+
+            case "codex":
+                if (_settings.ShowCodex == enabled)
+                    return;
+                _settings.ShowCodex = enabled;
+                _settings.Save();
+                _showCodexItem.Checked = enabled;
+                _codexIcons.ApplyMode(EffectiveMode(enabled));
+                if (!enabled)
+                    ResetCodexAuthState();
+                ApplyTimers();
+                UpdateAnchor();
+                UpdateWidget();
+                if (enabled)
+                    await RefreshCodexAsync(force: true);
+                break;
+
+            case "cursor":
+                if (_settings.ShowCursor == enabled)
+                    return;
+                _settings.ShowCursor = enabled;
+                _settings.Save();
+                _showCursorItem.Checked = enabled;
+                _cursorIcons.ApplyMode(EffectiveMode(enabled));
+                ApplyTimers();
+                UpdateAnchor();
+                UpdateWidget();
+                if (enabled)
+                    await RefreshCursorAsync();
+                break;
+        }
+    }
+
+    private void SetIconDisplayForMcp(IconDisplayMode mode)
+    {
+        _settings.IconMode = mode;
+        _settings.Save();
+        _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
+        _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
+        _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
+        foreach (ToolStripItem sibling in _iconDisplayParent.DropDownItems)
+            if (sibling is ToolStripMenuItem mi && mi.Tag is IconDisplayMode itemMode)
+                mi.Checked = itemMode == mode;
+        UpdateAnchor();
+    }
+
+    private void SetPollIntervalForMcp(int minutes)
+    {
+        if (Array.IndexOf(AllowedPollMinutes, minutes) < 0)
+            throw new ArgumentException($"Unsupported poll interval: {minutes}");
+
+        _settings.PollMinutes = minutes;
+        _settings.Save();
+        _baseIntervalMs = minutes * 60_000;
+        _claudeRetryCount = 0;
+        _claudeFastPollsRemaining = 0;
+        _codexRetryCount = 0;
+        _claudeTimer.Interval = _baseIntervalMs;
+        _codexTimer.Interval = _baseIntervalMs;
+        _cursorTimer.Interval = _baseIntervalMs;
+        foreach (ToolStripItem sibling in _intervalParent.DropDownItems)
+            if (sibling is ToolStripMenuItem mi && mi.Tag is int itemMinutes)
+                mi.Checked = itemMinutes == minutes;
+    }
+
+    private void SetTaskbarWidgetForMcp(bool? visible, int? offset)
+    {
+        if (visible is not null)
+            _settings.ShowTaskbarWidget = visible.Value;
+        if (offset is not null)
+        {
+            _settings.TaskbarWidgetOffset = offset.Value;
+            _taskbarWidget.SetOffset(offset.Value);
+        }
+        _settings.Save();
+        _widgetItem.Checked = _settings.ShowTaskbarWidget;
+        _taskbarWidget.Visible = _settings.ShowTaskbarWidget;
+        if (_settings.ShowTaskbarWidget)
+            UpdateWidget();
+    }
+
+    private void SetAutoUpdateForMcp(bool enabled)
+    {
+        _settings.AutoUpdate = enabled;
+        _settings.Save();
+        _autoUpdateItem.Checked = enabled;
+        if (enabled && !_paused)
+            _updateTimer.Start();
+        else
+            _updateTimer.Stop();
+    }
+
+    private async Task SetProxyForMcpAsync(McpUiActionRequest request)
+    {
+        if (request.Mode is not null)
+            _settings.ProxyMode = ParseProxyMode(request.Mode);
+        if (request.Protocol is not null)
+            _settings.ProxyProtocol = ParseProxyProtocol(request.Protocol);
+        if (request.Host is not null)
+            _settings.ProxyHost = string.IsNullOrWhiteSpace(request.Host)
+                ? throw new ArgumentException("Proxy host cannot be empty.")
+                : request.Host.Trim();
+        if (request.Port is not null)
+            _settings.ProxyPort = request.Port is > 0 and <= 65535
+                ? request.Port.Value
+                : throw new ArgumentException($"Invalid proxy port: {request.Port}");
+
+        _settings.Save();
+        foreach (ToolStripItem sibling in _proxyParent.DropDownItems)
+            if (sibling is ToolStripMenuItem mi && mi.Tag is ProxyMode mode)
+                mi.Checked = mode == _settings.ProxyMode;
+        await RefreshAllAsync(forceClaude: true, forceCodex: true);
+    }
+
+    private void SetStorageForMcp(McpUiActionRequest request)
+    {
+        SettingsStorageMode mode = ParseStorageMode(RequireString(request.Mode, "mode"));
+        SwitchStorageMode(mode, request.CustomRoot, showErrorDialog: false);
+    }
+
+    private void ShowDetailsForMcp()
+    {
+        IReadOnlyList<DetailsForm.Entry> entries = BuildDetailsEntries();
+        if (entries.Count == 0)
+            throw new InvalidOperationException("No providers are visible.");
+        _detailsForm.ShowAt(Cursor.Position, entries);
+    }
+
+    private async Task<string> CheckUpdateForMcpAsync(bool allowUpdateLaunch)
+    {
+        if (_updateInProgress)
+            throw new InvalidOperationException("Update check is already in progress.");
+
+        _updateInProgress = true;
+        try
+        {
+            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync(_settings.DisableMirrorDownload);
+            string message = outcome switch
+            {
+                UpdateCheckOutcome.Available => $"Update available: local={AutoUpdate.LocalCommitCount}, remote={AutoUpdate.RemoteCommitCount}.",
+                UpdateCheckOutcome.UpToDate => $"Up to date: local={AutoUpdate.LocalCommitCount}, remote={AutoUpdate.RemoteCommitCount}.",
+                UpdateCheckOutcome.Failed => $"Update check failed: {AutoUpdate.FailureReason}",
+                _ => outcome.ToString(),
+            };
+
+            if (allowUpdateLaunch && outcome == UpdateCheckOutcome.Available)
+            {
+                bool launched = AutoUpdate.LaunchUpdate();
+                message += launched ? " Updater launched." : " Updater launch failed.";
+            }
+
+            return message;
+        }
+        finally
+        {
+            _updateInProgress = false;
+        }
+    }
+
+    private void ShowAboutForMcp()
+    {
+        if (_aboutForm is { IsDisposed: false })
+        {
+            _aboutForm.Activate();
+            return;
+        }
+
+        _aboutForm = new AboutForm();
+        _aboutForm.FormClosed += (_, _) => _aboutForm = null;
+        _aboutForm.Show();
+        _aboutForm.Activate();
+    }
+
+    private void ScheduleExitForMcp()
+    {
+        Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            _uiContext?.Post(_ =>
+            {
+                if (!_disposed)
+                    ExitThread();
+            }, null);
+        });
+    }
+
+    private static bool RequireBool(bool? value, string name) =>
+        value ?? throw new ArgumentException($"Missing {name}.");
+
+    private static int RequireInt(int? value, string name) =>
+        value ?? throw new ArgumentException($"Missing {name}.");
+
+    private static string RequireString(string? value, string name) =>
+        value is null ? throw new ArgumentException($"Missing {name}.") : value;
+
+    private static IconDisplayMode ParseIconDisplayMode(string mode) =>
+        mode.Trim().ToLowerInvariant() switch
+        {
+            "none" => IconDisplayMode.None,
+            "single" => IconDisplayMode.Single,
+            "double" => IconDisplayMode.Double,
+            _ => throw new ArgumentException($"Unsupported icon display mode: {mode}"),
+        };
+
+    private static ProxyMode ParseProxyMode(string mode) =>
+        mode.Trim().ToLowerInvariant() switch
+        {
+            "direct" => ProxyMode.Direct,
+            "system" => ProxyMode.System,
+            "custom" => ProxyMode.Custom,
+            _ => throw new ArgumentException($"Unsupported proxy mode: {mode}"),
+        };
+
+    private static SettingsStorageMode ParseStorageMode(string mode) =>
+        mode.Trim().ToLowerInvariant() switch
+        {
+            "appdata" or "app_data" or "app-data" => SettingsStorageMode.AppData,
+            "portable" => SettingsStorageMode.Portable,
+            "custom" => SettingsStorageMode.Custom,
+            _ => throw new ArgumentException($"Unsupported storage mode: {mode}"),
+        };
+
+    private static string ParseProxyProtocol(string protocol) =>
+        protocol.Trim().ToLowerInvariant() switch
+        {
+            "socks" or "socks5" => "socks5",
+            "http" or "https" => "http",
+            _ => throw new ArgumentException($"Unsupported proxy protocol: {protocol}"),
+        };
+
+    private static string FormatIconDisplayMode(IconDisplayMode mode) => mode switch
+    {
+        IconDisplayMode.None => "none",
+        IconDisplayMode.Single => "single",
+        IconDisplayMode.Double => "double",
+        _ => mode.ToString(),
+    };
+
+    private static string FormatProxyMode(ProxyMode mode) => mode switch
+    {
+        ProxyMode.Direct => "direct",
+        ProxyMode.System => "system",
+        ProxyMode.Custom => "custom",
+        _ => mode.ToString(),
+    };
+
+    private static string FormatStorageMode(SettingsStorageMode mode) => mode switch
+    {
+        SettingsStorageMode.AppData => "appData",
+        SettingsStorageMode.Portable => "portable",
+        SettingsStorageMode.Custom => "custom",
+        _ => mode.ToString(),
+    };
 
     private Task<T> InvokeOnUiThreadAsync<T>(Func<Task<T>> action, CancellationToken ct)
     {
@@ -1728,6 +2192,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _anchor.Visible = false;
             _anchor.Dispose();
             _anchorIcon?.Dispose();
+            _aboutForm?.Dispose();
             _detailsForm.Dispose();
             _taskbarWidget.Dispose();
             _systemChangeListener.Dispose();

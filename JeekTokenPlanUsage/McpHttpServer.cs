@@ -11,6 +11,8 @@ namespace JeekTokenPlanUsage;
 internal interface IMcpUsageSource
 {
     Task<McpUsageState> GetUsageAsync(string? provider, bool refresh, CancellationToken ct);
+    Task<McpUiState> GetUiStateAsync(CancellationToken ct);
+    Task<McpUiActionResult> InvokeUiActionAsync(McpUiActionRequest request, CancellationToken ct);
 }
 
 internal sealed record McpUsageState(
@@ -33,6 +35,70 @@ internal sealed record McpUsageWindow(
     string Label,
     double? Utilization,
     DateTimeOffset? ResetsAt);
+
+internal sealed record McpUiState(
+    DateTimeOffset GeneratedAt,
+    bool DetailsVisible,
+    bool AnchorVisible,
+    string LogPath,
+    McpUiSettings Settings,
+    McpUiAllowedValues AllowedValues);
+
+internal sealed record McpUiSettings(
+    bool Paused,
+    bool RunAtStartup,
+    bool ShowClaude,
+    bool ShowCodex,
+    bool ShowCursor,
+    string IconMode,
+    int PollMinutes,
+    string Language,
+    bool EnableThresholdNotifications,
+    bool ShowTaskbarWidget,
+    int TaskbarWidgetOffset,
+    bool AutoUpdate,
+    bool DisableMirrorDownload,
+    string ProxyMode,
+    string ProxyProtocol,
+    string ProxyHost,
+    int ProxyPort,
+    string StorageMode,
+    string CustomStorageRoot,
+    string RoamingConfigDirectory,
+    string RoamingSettingsPath);
+
+internal sealed record McpUiAllowedValues(
+    IReadOnlyList<string> Providers,
+    IReadOnlyList<string> IconModes,
+    IReadOnlyList<int> PollMinutes,
+    IReadOnlyList<string> Languages,
+    IReadOnlyList<string> ProxyModes,
+    IReadOnlyList<string> ProxyProtocols,
+    IReadOnlyList<string> StorageModes,
+    IReadOnlyList<string> Actions);
+
+internal sealed record McpUiActionRequest(
+    string Action,
+    string? Provider,
+    bool? Paused,
+    bool? Enabled,
+    bool? Visible,
+    string? Mode,
+    int? Minutes,
+    string? Language,
+    int? Offset,
+    string? Protocol,
+    string? Host,
+    int? Port,
+    string? CustomRoot,
+    bool? AllowUpdateLaunch);
+
+internal sealed record McpUiActionResult(
+    DateTimeOffset GeneratedAt,
+    string Action,
+    bool Succeeded,
+    string Message,
+    McpUiState State);
 
 internal sealed class McpHttpServer : IDisposable
 {
@@ -78,6 +144,102 @@ internal sealed class McpHttpServer : IDisposable
               "description": "Optional provider id. Omit it to refresh all providers."
             }
           },
+          "additionalProperties": false
+        }
+        """)!;
+
+    private static readonly JsonNode EmptyInputSchema = JsonNode.Parse("""
+        {
+          "type": "object",
+          "additionalProperties": false
+        }
+        """)!;
+
+    private static readonly JsonNode UiActionInputSchema = JsonNode.Parse("""
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "refresh",
+                "set_paused",
+                "set_provider_enabled",
+                "set_icon_display",
+                "set_poll_interval",
+                "set_language",
+                "set_threshold_notifications",
+                "set_taskbar_widget",
+                "set_startup",
+                "set_auto_update",
+                "set_proxy",
+                "set_storage",
+                "show_details",
+                "hide_details",
+                "toggle_details",
+                "open_log",
+                "check_update",
+                "show_about",
+                "exit_app"
+              ]
+            },
+            "provider": {
+              "type": "string",
+              "enum": ["claude", "codex", "cursor"],
+              "description": "Provider id for provider-specific actions."
+            },
+            "paused": {
+              "type": "boolean",
+              "description": "Required by set_paused."
+            },
+            "enabled": {
+              "type": "boolean",
+              "description": "Required by set_provider_enabled, set_threshold_notifications, set_startup, and set_auto_update."
+            },
+            "visible": {
+              "type": "boolean",
+              "description": "Optional for set_taskbar_widget."
+            },
+            "mode": {
+              "type": "string",
+              "description": "Icon mode, proxy mode, or storage mode depending on the action."
+            },
+            "minutes": {
+              "type": "integer",
+              "description": "Required by set_poll_interval."
+            },
+            "language": {
+              "type": "string",
+              "description": "Required by set_language. Use empty string to follow system UI language."
+            },
+            "offset": {
+              "type": "integer",
+              "description": "Optional taskbar widget offset for set_taskbar_widget."
+            },
+            "protocol": {
+              "type": "string",
+              "enum": ["socks5", "http"],
+              "description": "Optional custom proxy protocol for set_proxy."
+            },
+            "host": {
+              "type": "string",
+              "description": "Optional custom proxy host for set_proxy."
+            },
+            "port": {
+              "type": "integer",
+              "description": "Optional custom proxy port for set_proxy."
+            },
+            "customRoot": {
+              "type": "string",
+              "description": "Required when set_storage mode is custom and no custom root is already saved."
+            },
+            "allowUpdateLaunch": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, check_update may launch the updater if one is available."
+            }
+          },
+          "required": ["action"],
           "additionalProperties": false
         }
         """)!;
@@ -384,6 +546,18 @@ internal sealed class McpHttpServer : IDisposable
                 ["description"] = "Refresh one provider or all providers, then return the updated usage snapshot.",
                 ["inputSchema"] = RefreshUsageInputSchema.DeepClone(),
             },
+            new JsonObject
+            {
+                ["name"] = "get_ui_state",
+                ["description"] = "Return the tray app's current UI and settings state for automation.",
+                ["inputSchema"] = EmptyInputSchema.DeepClone(),
+            },
+            new JsonObject
+            {
+                ["name"] = "ui_action",
+                ["description"] = "Invoke a tray-menu-equivalent UI action for automation and testing.",
+                ["inputSchema"] = UiActionInputSchema.DeepClone(),
+            },
         },
     };
 
@@ -399,8 +573,75 @@ internal sealed class McpHttpServer : IDisposable
         {
             "get_usage" => await BuildUsageToolResultAsync(arguments, refreshDefault: false, ct),
             "refresh_usage" => await BuildUsageToolResultAsync(arguments, refreshDefault: true, ct),
+            "get_ui_state" => await BuildUiStateToolResultAsync(ct),
+            "ui_action" => await BuildUiActionToolResultAsync(arguments, ct),
             _ => throw new JsonRpcException(-32602, $"Unknown tool: {name}"),
         };
+    }
+
+    private async Task<JsonObject> BuildUiStateToolResultAsync(CancellationToken ct)
+    {
+        McpUiState state = await _usageSource.GetUiStateAsync(ct);
+        JsonNode structured = JsonSerializer.SerializeToNode(state, JsonOptions)!;
+        return new JsonObject
+        {
+            ["content"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = FormatUiStateText(state),
+                },
+            },
+            ["structuredContent"] = structured,
+        };
+    }
+
+    private async Task<JsonObject> BuildUiActionToolResultAsync(JsonObject? arguments, CancellationToken ct)
+    {
+        try
+        {
+            var request = new McpUiActionRequest(
+                Action: ReadString(arguments, "action") ?? throw new ArgumentException("Missing action."),
+                Provider: ReadString(arguments, "provider"),
+                Paused: ReadBool(arguments, "paused"),
+                Enabled: ReadBool(arguments, "enabled"),
+                Visible: ReadBool(arguments, "visible"),
+                Mode: ReadString(arguments, "mode"),
+                Minutes: ReadInt(arguments, "minutes"),
+                Language: ReadString(arguments, "language"),
+                Offset: ReadInt(arguments, "offset"),
+                Protocol: ReadString(arguments, "protocol"),
+                Host: ReadString(arguments, "host"),
+                Port: ReadInt(arguments, "port"),
+                CustomRoot: ReadString(arguments, "customRoot"),
+                AllowUpdateLaunch: ReadBool(arguments, "allowUpdateLaunch"));
+            McpUiActionResult result = await _usageSource.InvokeUiActionAsync(request, ct);
+            JsonNode structured = JsonSerializer.SerializeToNode(result, JsonOptions)!;
+            var response = new JsonObject
+            {
+                ["content"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = FormatUiActionText(result),
+                    },
+                },
+                ["structuredContent"] = structured,
+            };
+            if (!result.Succeeded)
+                response["isError"] = true;
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return ToolError(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolError(ex.Message);
+        }
     }
 
     private async Task<JsonObject> BuildUsageToolResultAsync(JsonObject? arguments, bool refreshDefault, CancellationToken ct)
@@ -466,6 +707,46 @@ internal sealed class McpHttpServer : IDisposable
 
         return sb.ToString().TrimEnd();
     }
+
+    private static string FormatUiStateText(McpUiState state)
+    {
+        McpUiSettings s = state.Settings;
+        return string.Join(Environment.NewLine, new[]
+        {
+            $"generatedAt: {state.GeneratedAt:O}",
+            $"paused: {s.Paused.ToString().ToLowerInvariant()}",
+            $"detailsVisible: {state.DetailsVisible.ToString().ToLowerInvariant()}",
+            $"providers: claude={s.ShowClaude.ToString().ToLowerInvariant()}, codex={s.ShowCodex.ToString().ToLowerInvariant()}, cursor={s.ShowCursor.ToString().ToLowerInvariant()}",
+            $"iconMode: {s.IconMode}",
+            $"pollMinutes: {s.PollMinutes}",
+            $"language: {(string.IsNullOrEmpty(s.Language) ? "system" : s.Language)}",
+            $"notifications: {s.EnableThresholdNotifications.ToString().ToLowerInvariant()}",
+            $"taskbarWidget: {s.ShowTaskbarWidget.ToString().ToLowerInvariant()}, offset={s.TaskbarWidgetOffset}",
+            $"startup: {s.RunAtStartup.ToString().ToLowerInvariant()}",
+            $"autoUpdate: {s.AutoUpdate.ToString().ToLowerInvariant()}",
+            $"proxy: {s.ProxyMode} {s.ProxyProtocol}://{s.ProxyHost}:{s.ProxyPort}",
+            $"storage: {s.StorageMode}, config={s.RoamingConfigDirectory}",
+            $"logPath: {state.LogPath}",
+        });
+    }
+
+    private static string FormatUiActionText(McpUiActionResult result) =>
+        $"{result.Action}: {(result.Succeeded ? "ok" : "failed")} - {result.Message}";
+
+    private static string? ReadString(JsonObject? arguments, string property) =>
+        arguments is not null && arguments.TryGetPropertyValue(property, out JsonNode? node) && node is not null
+            ? node.GetValue<string>()
+            : null;
+
+    private static bool? ReadBool(JsonObject? arguments, string property) =>
+        arguments is not null && arguments.TryGetPropertyValue(property, out JsonNode? node) && node is not null
+            ? node.GetValue<bool>()
+            : null;
+
+    private static int? ReadInt(JsonObject? arguments, string property) =>
+        arguments is not null && arguments.TryGetPropertyValue(property, out JsonNode? node) && node is not null
+            ? node.GetValue<int>()
+            : null;
 
     private static JsonObject BuildResult(JsonNode? id, JsonNode result) => new()
     {
