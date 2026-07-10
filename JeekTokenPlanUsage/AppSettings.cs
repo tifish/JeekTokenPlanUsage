@@ -6,7 +6,7 @@ namespace JeekTokenPlanUsage;
 
 /// How many tray icons each enabled provider contributes.
 ///   None - no per-provider icons; only the anchor stays visible.
-///   Single - one icon per provider (Claude/Codex show 5h, Cursor shows API);
+///   Single - one icon per provider (Claude/Codex/Grok show primary, Cursor shows API);
 ///            the tooltip lists both windows on two lines.
 ///   Double - separate icons for each window (default).
 public enum IconDisplayMode
@@ -58,6 +58,7 @@ internal sealed class AppSettings
     public bool ShowClaude { get; set; } = true;
     public bool ShowCodex { get; set; } = true;
     public bool ShowCursor { get; set; } = true;
+    public bool ShowGrok { get; set; } = true;
 
     /// Local runtime state: pausing one machine should not pause another
     /// machine when roaming settings are shared.
@@ -67,10 +68,10 @@ internal sealed class AppSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public IconDisplayMode IconMode { get; set; } = IconDisplayMode.Double;
 
-    /// Base polling interval shared by all three providers (minutes). Allowed:
+    /// Base polling interval shared by all providers (minutes). Allowed:
     /// 1, 2, 3, 5, 10. Claude's poll may hit the messages-API fallback which
     /// costs real quota - 1 minute is available but burns quota fast; default
-    /// is 5. Codex / Cursor endpoints are free, so they just inherit this.
+    /// is 5. Codex / Cursor / Grok endpoints are free, so they just inherit this.
     public int PollMinutes { get; set; } = 5;
 
     /// UI language override. Empty / null = follow system UI language, with
@@ -240,6 +241,7 @@ internal sealed class AppSettings
                 ShowClaude = ClaudeUsageProvider.HasLocalCredentials(),
                 ShowCodex = CodexUsageProvider.HasLocalCredentials(),
                 ShowCursor = CursorUsageProvider.HasLocalCredentials(),
+                ShowGrok = GrokUsageProvider.HasLocalCredentials(),
             };
         }
 
@@ -474,6 +476,7 @@ internal sealed class AppSettings
         ShowClaude = other.ShowClaude;
         ShowCodex = other.ShowCodex;
         ShowCursor = other.ShowCursor;
+        ShowGrok = other.ShowGrok;
         Paused = other.Paused;
         IconMode = other.IconMode;
         PollMinutes = other.PollMinutes;
@@ -568,6 +571,7 @@ internal sealed class AppSettings
         public bool ShowClaude { get; set; } = true;
         public bool ShowCodex { get; set; } = true;
         public bool ShowCursor { get; set; } = true;
+        public bool ShowGrok { get; set; } = true;
 
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public IconDisplayMode IconMode { get; set; } = IconDisplayMode.Double;
@@ -583,6 +587,7 @@ internal sealed class AppSettings
             ShowClaude = settings.ShowClaude,
             ShowCodex = settings.ShowCodex,
             ShowCursor = settings.ShowCursor,
+            ShowGrok = settings.ShowGrok,
             IconMode = settings.IconMode,
             PollMinutes = settings.PollMinutes,
             Language = settings.Language,

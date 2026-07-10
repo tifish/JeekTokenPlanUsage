@@ -8,11 +8,11 @@ namespace JeekTokenPlanUsage;
 
 public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 {
-    // Allowed base polling intervals (minutes), shared across all three
-    // providers. Claude's fallback path may consume quota at the shorter end;
-    // 1 minute is offered for users who accept that cost in exchange for
-    // fresher data. The upper bound stays low: idle pause already covers the
-    // away case, so a stale number adds nothing useful during active use.
+    // Allowed base polling intervals (minutes), shared across all providers.
+    // Claude's fallback path may consume quota at the shorter end; 1 minute is
+    // offered for users who accept that cost in exchange for fresher data. The
+    // upper bound stays low: idle pause already covers the away case, so a
+    // stale number adds nothing useful during active use.
     private static readonly int[] AllowedPollMinutes = { 1, 2, 3, 5, 10 };
 
     // After a successful Claude poll whose returned reset time is already in
@@ -40,6 +40,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private readonly ClaudeUsageProvider _claude = new();
     private readonly CodexUsageProvider _codex = new();
     private readonly CursorUsageProvider _cursor = new();
+    private readonly GrokUsageProvider _grok = new();
 
     // Stable GUIDs for every tray icon. Required so Windows 11's drag-to-reorder
     // can tell our icons apart — without NIF_GUID the shell uses (exe path +
@@ -52,15 +53,19 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private static readonly Guid CodexSecondaryGuid = new("1d7bd7f9-da62-4c65-8127-a198d80fbe96");
     private static readonly Guid CursorPrimaryGuid = new("34c0a3e5-d659-4612-bfb0-8c9470d65304");
     private static readonly Guid CursorSecondaryGuid = new("39ce63d9-34ad-4ccc-85ee-4a97070cc2aa");
+    private static readonly Guid GrokPrimaryGuid = new("a8e4f2c1-7b3d-4e9a-9c1f-2d6b8a5e0f41");
+    private static readonly Guid GrokSecondaryGuid = new("b9f5a3d2-8c4e-5f0b-ad2e-3e7c9b6f1052");
     private static readonly Color AnchorFrameColor = Color.FromArgb(100, 100, 100);
 
     private readonly ProviderIcons _claudeIcons;
     private readonly ProviderIcons _codexIcons;
     private readonly ProviderIcons _cursorIcons;
+    private readonly ProviderIcons _grokIcons;
 
     private readonly WinTimer _claudeTimer;
     private readonly WinTimer _codexTimer;
     private readonly WinTimer _cursorTimer;
+    private readonly WinTimer _grokTimer;
 
     private readonly AppSettings _settings;
     private readonly TrayIcon _anchor;
@@ -78,16 +83,19 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private DateTimeOffset _claudeLastPollAt = DateTimeOffset.MinValue;
     private DateTimeOffset _codexLastPollAt = DateTimeOffset.MinValue;
     private DateTimeOffset _cursorLastPollAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _grokLastPollAt = DateTimeOffset.MinValue;
 
     private UsageSnapshot? _claudeSnap;
     private UsageSnapshot? _codexSnap;
     private UsageSnapshot? _cursorSnap;
+    private UsageSnapshot? _grokSnap;
 
     private int _baseIntervalMs;
     private int _claudeRetryCount;
     private int _claudeFastPollsRemaining;
     private string _claudeAuthCredentialSignature = string.Empty;
     private string _codexAuthCredentialSignature = string.Empty;
+    private string _grokAuthCredentialSignature = string.Empty;
     private UsageSnapshot? _claudeLastSuccessfulSnap;
 
     private bool _claudeBusy;
@@ -100,6 +108,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private bool _codexIdlePaused;
     private int _codexRetryCount;
     private bool _cursorBusy;
+    private bool _grokBusy;
+    private bool _grokAuthPaused;
+    private bool _grokAuthNotified;
+    private bool _grokIdlePaused;
+    private int _grokRetryCount;
     private bool _disposed;
     private bool _paused;
 
@@ -113,6 +126,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private ToolStripMenuItem _showClaudeItem = null!;
     private ToolStripMenuItem _showCodexItem = null!;
     private ToolStripMenuItem _showCursorItem = null!;
+    private ToolStripMenuItem _showGrokItem = null!;
     private ToolStripMenuItem _iconDisplayParent = null!;
     private ToolStripMenuItem _intervalParent = null!;
     private ToolStripMenuItem _languageItem = null!;
@@ -192,6 +206,21 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             notifyEnabled,
             onLeftClick
         );
+        // Grok / xAI brand leans black-and-white; we use a violet pair so it stays
+        // distinct from Claude (orange), Codex (blue), and Cursor (slate). Weekly
+        // SuperGrok pool + monthly included credits both use long date format.
+        // In single-icon mode surface the weekly pool (the SuperGrok shared quota).
+        _grokIcons = new ProviderIcons(
+            "Grok",
+            new WindowSpec(Color.FromArgb(160, 120, 255), "7d", LongDate: true),
+            new WindowSpec(Color.FromArgb(100, 70, 180), "Mo", LongDate: true),
+            SingleModeWindow.Primary,
+            GrokPrimaryGuid,
+            GrokSecondaryGuid,
+            menu,
+            notifyEnabled,
+            onLeftClick
+        );
 
         _anchorIcon = IconRenderer.Render(AnchorFrameColor, null, isError: true, placeholder: "T");
         _anchor = new TrayIcon(AnchorGuid, menu)
@@ -224,6 +253,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
         _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
         _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
+        _grokIcons.ApplyMode(EffectiveMode(_settings.ShowGrok));
         UpdateAnchor();
         _taskbarWidget.Visible = _settings.ShowTaskbarWidget;
 
@@ -235,6 +265,9 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 
         _cursorTimer = new WinTimer { Interval = _baseIntervalMs };
         _cursorTimer.Tick += async (_, _) => await RefreshCursorAsync();
+
+        _grokTimer = new WinTimer { Interval = _baseIntervalMs };
+        _grokTimer.Tick += async (_, _) => await RefreshGrokAsync();
 
         WireIconDisplayMenu();
         WireIntervalMenu();
@@ -264,6 +297,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 _ = RefreshCodexAsync(force: true);
             if (_settings.ShowCursor)
                 _ = RefreshCursorAsync();
+            if (_settings.ShowGrok)
+                _ = RefreshGrokAsync(force: true);
         }
 
         _startupItem.Checked = _settings.RunAtStartup;
@@ -321,6 +356,23 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             UpdateWidget();
             if (next)
                 await RefreshCursorAsync();
+        };
+
+        _showGrokItem.Checked = _settings.ShowGrok;
+        _showGrokItem.Click += async (_, _) =>
+        {
+            bool next = !_showGrokItem.Checked;
+            _settings.ShowGrok = next;
+            _settings.Save();
+            _showGrokItem.Checked = next;
+            _grokIcons.ApplyMode(EffectiveMode(next));
+            if (!next)
+                ResetGrokAuthState();
+            ApplyTimers();
+            UpdateAnchor();
+            UpdateWidget();
+            if (next)
+                await RefreshGrokAsync(force: true);
         };
 
         _notifyItem.Checked = _settings.EnableThresholdNotifications;
@@ -499,9 +551,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _claudeRetryCount = 0;
         _claudeFastPollsRemaining = 0;
         _codexRetryCount = 0;
+        _grokRetryCount = 0;
         _claudeTimer.Interval = _baseIntervalMs;
         _codexTimer.Interval = _baseIntervalMs;
         _cursorTimer.Interval = _baseIntervalMs;
+        _grokTimer.Interval = _baseIntervalMs;
 
         _pauseItem.Checked = _paused;
         _refreshItem.Enabled = !_paused;
@@ -510,6 +564,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _showClaudeItem.Checked = _settings.ShowClaude;
         _showCodexItem.Checked = _settings.ShowCodex;
         _showCursorItem.Checked = _settings.ShowCursor;
+        _showGrokItem.Checked = _settings.ShowGrok;
         _notifyItem.Checked = _settings.EnableThresholdNotifications;
         _widgetItem.Checked = _settings.ShowTaskbarWidget;
         _autoUpdateItem.Checked = _settings.AutoUpdate;
@@ -525,6 +580,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
         _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
         _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
+        _grokIcons.ApplyMode(EffectiveMode(_settings.ShowGrok));
         ApplyPausedVisuals();
         ApplyTimers();
         if (_settings.AutoUpdate && !_paused)
@@ -535,7 +591,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         UpdateWidget();
 
         if (!_paused)
-            _ = RefreshAllAsync(forceClaude: true, forceCodex: true);
+            _ = RefreshAllAsync(forceClaude: true, forceCodex: true, forceGrok: true);
     }
 
     private void UpdateMenuChecks()
@@ -605,21 +661,24 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             bool refreshClaude = _settings.ShowClaude && now - _claudeLastPollAt >= window;
             bool refreshCodex = _settings.ShowCodex && now - _codexLastPollAt >= window;
             bool refreshCursor = _settings.ShowCursor && now - _cursorLastPollAt >= window;
+            bool refreshGrok = _settings.ShowGrok && now - _grokLastPollAt >= window;
 
-            if (!refreshClaude && !refreshCodex && !refreshCursor)
+            if (!refreshClaude && !refreshCodex && !refreshCursor && !refreshGrok)
             {
                 Log.Info($"Skipping refresh on {reason}; all providers polled within base interval");
                 return;
             }
 
             Log.Info(
-                $"Forcing refresh on {reason} (claude={refreshClaude}, codex={refreshCodex}, cursor={refreshCursor})");
+                $"Forcing refresh on {reason} (claude={refreshClaude}, codex={refreshCodex}, cursor={refreshCursor}, grok={refreshGrok})");
             if (refreshClaude)
                 _ = RefreshClaudeAsync(force: true);
             if (refreshCodex)
                 _ = RefreshCodexAsync(force: true);
             if (refreshCursor)
                 _ = RefreshCursorAsync();
+            if (refreshGrok)
+                _ = RefreshGrokAsync(force: true);
         }, null);
     }
 
@@ -633,7 +692,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private void UpdateAnchor()
     {
         bool anyIcon = _settings.IconMode != IconDisplayMode.None
-            && (_settings.ShowClaude || _settings.ShowCodex || _settings.ShowCursor);
+            && (_settings.ShowClaude || _settings.ShowCodex || _settings.ShowCursor || _settings.ShowGrok);
         _anchor.Visible = !anyIcon;
     }
 
@@ -649,6 +708,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _claudeTimer.Stop();
             _codexTimer.Stop();
             _cursorTimer.Stop();
+            _grokTimer.Stop();
             return;
         }
 
@@ -666,6 +726,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _cursorTimer.Start();
         else
             _cursorTimer.Stop();
+
+        if (_settings.ShowGrok)
+            _grokTimer.Start();
+        else
+            _grokTimer.Stop();
     }
 
     // Toggle the global pause. While paused the app performs no work: every poll
@@ -696,7 +761,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             if (_settings.AutoUpdate)
                 _updateTimer.Start();
             Log.Info("Monitoring resumed by user");
-            _ = RefreshAllAsync(forceClaude: true, forceCodex: true);
+            _ = RefreshAllAsync(forceClaude: true, forceCodex: true, forceGrok: true);
         }
     }
 
@@ -707,6 +772,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _claudeIcons.SetPaused(_paused);
         _codexIcons.SetPaused(_paused);
         _cursorIcons.SetPaused(_paused);
+        _grokIcons.SetPaused(_paused);
         Icon rendered = IconRenderer.Render(
             AnchorFrameColor,
             null,
@@ -739,6 +805,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
                 _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
                 _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
+                _grokIcons.ApplyMode(EffectiveMode(_settings.ShowGrok));
                 UpdateAnchor();
             };
         }
@@ -759,9 +826,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 _claudeRetryCount = 0;
                 _claudeFastPollsRemaining = 0;
                 _codexRetryCount = 0;
+                _grokRetryCount = 0;
                 _claudeTimer.Interval = _baseIntervalMs;
                 _codexTimer.Interval = _baseIntervalMs;
                 _cursorTimer.Interval = _baseIntervalMs;
+                _grokTimer.Interval = _baseIntervalMs;
                 foreach (ToolStripItem sibling in _intervalParent.DropDownItems)
                     if (sibling is ToolStripMenuItem mi)
                         mi.Checked = ReferenceEquals(mi, item);
@@ -876,7 +945,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                         mi.Checked = ReferenceEquals(mi, item);
                 // The next request reads the new mode through AppProxy, but poke
                 // a refresh so the change is visible without waiting for a tick.
-                await RefreshAllAsync(forceClaude: true, forceCodex: true);
+                await RefreshAllAsync(forceClaude: true, forceCodex: true, forceGrok: true);
             };
         }
 
@@ -895,7 +964,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             foreach (ToolStripItem sibling in _proxyParent.DropDownItems)
                 if (sibling is ToolStripMenuItem mi && mi.Tag is ProxyMode m)
                     mi.Checked = (m == ProxyMode.Custom);
-            await RefreshAllAsync(forceClaude: true, forceCodex: true);
+            await RefreshAllAsync(forceClaude: true, forceCodex: true, forceGrok: true);
         };
     }
 
@@ -933,6 +1002,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _showClaudeItem.Text = Strings.Menu_ShowClaude;
         _showCodexItem.Text = Strings.Menu_ShowCodex;
         _showCursorItem.Text = Strings.Menu_ShowCursor;
+        _showGrokItem.Text = Strings.Menu_ShowGrok;
         _iconDisplayParent.Text = Strings.Menu_IconDisplay;
         _intervalParent.Text = Strings.Menu_RefreshInterval;
         _languageItem.Text = Strings.Menu_Language;
@@ -990,12 +1060,13 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _pauseItem = new ToolStripMenuItem(Strings.Menu_Pause);
 
         _refreshItem = new ToolStripMenuItem(Strings.Menu_RefreshNow);
-        _refreshItem.Click += async (_, _) => await RefreshAllAsync(forceClaude: true, forceCodex: true);
+        _refreshItem.Click += async (_, _) => await RefreshAllAsync(forceClaude: true, forceCodex: true, forceGrok: true);
 
         _startupItem = new ToolStripMenuItem(Strings.Menu_RunAtStartup);
         _showClaudeItem = new ToolStripMenuItem(Strings.Menu_ShowClaude);
         _showCodexItem = new ToolStripMenuItem(Strings.Menu_ShowCodex);
         _showCursorItem = new ToolStripMenuItem(Strings.Menu_ShowCursor);
+        _showGrokItem = new ToolStripMenuItem(Strings.Menu_ShowGrok);
 
         _iconDisplayParent = new ToolStripMenuItem(Strings.Menu_IconDisplay);
         foreach (IconDisplayMode mode in new[] { IconDisplayMode.None, IconDisplayMode.Single, IconDisplayMode.Double })
@@ -1068,6 +1139,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         menu.Items.Add(_showClaudeItem);
         menu.Items.Add(_showCodexItem);
         menu.Items.Add(_showCursorItem);
+        menu.Items.Add(_showGrokItem);
         menu.Items.Add(_iconDisplayParent);
         menu.Items.Add(_intervalParent);
         menu.Items.Add(_languageItem);
@@ -1082,7 +1154,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         return menu;
     }
 
-    private async Task RefreshAllAsync(bool forceClaude = false, bool forceCodex = false)
+    private async Task RefreshAllAsync(bool forceClaude = false, bool forceCodex = false, bool forceGrok = false)
     {
         var tasks = new List<Task>();
         if (_settings.ShowClaude)
@@ -1091,6 +1163,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             tasks.Add(RefreshCodexAsync(forceCodex));
         if (_settings.ShowCursor)
             tasks.Add(RefreshCursorAsync());
+        if (_settings.ShowGrok)
+            tasks.Add(RefreshGrokAsync(forceGrok));
         await Task.WhenAll(tasks);
     }
 
@@ -1119,7 +1193,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 await Task.WhenAll(
                     RefreshClaudeAsync(force: true),
                     RefreshCodexAsync(force: true),
-                    RefreshCursorAsync());
+                    RefreshCursorAsync(),
+                    RefreshGrokAsync(force: true));
                 break;
 
             case "claude":
@@ -1133,15 +1208,20 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             case "cursor":
                 await RefreshCursorAsync();
                 break;
+
+            case "grok":
+                await RefreshGrokAsync(force: true);
+                break;
         }
     }
 
     private McpUsageState BuildMcpUsageState(string? provider)
     {
-        var providers = new List<McpProviderState>(3);
+        var providers = new List<McpProviderState>(4);
         AddProvider("claude", "Claude", _settings.ShowClaude, _claudeLastPollAt, _claudeSnap);
         AddProvider("codex", "Codex", _settings.ShowCodex, _codexLastPollAt, _codexSnap);
         AddProvider("cursor", "Cursor", _settings.ShowCursor, _cursorLastPollAt, _cursorSnap);
+        AddProvider("grok", "Grok", _settings.ShowGrok, _grokLastPollAt, _grokSnap);
         return new McpUsageState(DateTimeOffset.UtcNow, _paused, providers);
 
         void AddProvider(
@@ -1168,19 +1248,23 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 
     private static IReadOnlyList<McpUsageWindow> BuildMcpWindows(string provider, UsageSnapshot? snapshot)
     {
-        bool cursor = provider == "cursor";
-        return new[]
+        return provider switch
         {
-            new McpUsageWindow(
-                cursor ? "auto" : "five_hour",
-                cursor ? "Auto" : "5h",
-                snapshot?.FiveHour?.Utilization,
-                snapshot?.FiveHour?.ResetsAt),
-            new McpUsageWindow(
-                cursor ? "api" : "weekly",
-                cursor ? "API" : "Weekly",
-                snapshot?.Weekly?.Utilization,
-                snapshot?.Weekly?.ResetsAt),
+            "cursor" => new[]
+            {
+                new McpUsageWindow("auto", "Auto", snapshot?.FiveHour?.Utilization, snapshot?.FiveHour?.ResetsAt),
+                new McpUsageWindow("api", "API", snapshot?.Weekly?.Utilization, snapshot?.Weekly?.ResetsAt),
+            },
+            "grok" => new[]
+            {
+                new McpUsageWindow("weekly", "7d", snapshot?.FiveHour?.Utilization, snapshot?.FiveHour?.ResetsAt),
+                new McpUsageWindow("monthly", "Mo", snapshot?.Weekly?.Utilization, snapshot?.Weekly?.ResetsAt),
+            },
+            _ => new[]
+            {
+                new McpUsageWindow("five_hour", "5h", snapshot?.FiveHour?.Utilization, snapshot?.FiveHour?.ResetsAt),
+                new McpUsageWindow("weekly", "Weekly", snapshot?.Weekly?.Utilization, snapshot?.Weekly?.ResetsAt),
+            },
         };
     }
 
@@ -1190,7 +1274,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             return null;
 
         string normalized = provider.Trim().ToLowerInvariant();
-        return normalized is "claude" or "codex" or "cursor"
+        return normalized is "claude" or "codex" or "cursor" or "grok"
             ? normalized
             : throw new ArgumentException($"Unknown provider: {provider}");
     }
@@ -1329,6 +1413,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _settings.ShowClaude,
             _settings.ShowCodex,
             _settings.ShowCursor,
+            _settings.ShowGrok,
             FormatIconDisplayMode(_settings.IconMode),
             _settings.PollMinutes,
             _settings.Language,
@@ -1346,7 +1431,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _settings.RoamingConfigDirectory,
             _settings.RoamingSettingsPath),
         new McpUiAllowedValues(
-            new[] { "claude", "codex", "cursor" },
+            new[] { "claude", "codex", "cursor", "grok" },
             new[] { "none", "single", "double" },
             AllowedPollMinutes,
             new[] { "", "zh-CN", "en" },
@@ -1425,6 +1510,22 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 if (enabled)
                     await RefreshCursorAsync();
                 break;
+
+            case "grok":
+                if (_settings.ShowGrok == enabled)
+                    return;
+                _settings.ShowGrok = enabled;
+                _settings.Save();
+                _showGrokItem.Checked = enabled;
+                _grokIcons.ApplyMode(EffectiveMode(enabled));
+                if (!enabled)
+                    ResetGrokAuthState();
+                ApplyTimers();
+                UpdateAnchor();
+                UpdateWidget();
+                if (enabled)
+                    await RefreshGrokAsync(force: true);
+                break;
         }
     }
 
@@ -1435,6 +1536,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _claudeIcons.ApplyMode(EffectiveMode(_settings.ShowClaude));
         _codexIcons.ApplyMode(EffectiveMode(_settings.ShowCodex));
         _cursorIcons.ApplyMode(EffectiveMode(_settings.ShowCursor));
+        _grokIcons.ApplyMode(EffectiveMode(_settings.ShowGrok));
         foreach (ToolStripItem sibling in _iconDisplayParent.DropDownItems)
             if (sibling is ToolStripMenuItem mi && mi.Tag is IconDisplayMode itemMode)
                 mi.Checked = itemMode == mode;
@@ -1452,9 +1554,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _claudeRetryCount = 0;
         _claudeFastPollsRemaining = 0;
         _codexRetryCount = 0;
+        _grokRetryCount = 0;
         _claudeTimer.Interval = _baseIntervalMs;
         _codexTimer.Interval = _baseIntervalMs;
         _cursorTimer.Interval = _baseIntervalMs;
+        _grokTimer.Interval = _baseIntervalMs;
         foreach (ToolStripItem sibling in _intervalParent.DropDownItems)
             if (sibling is ToolStripMenuItem mi && mi.Tag is int itemMinutes)
                 mi.Checked = itemMinutes == minutes;
@@ -1973,6 +2077,109 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         }
     }
 
+    private async Task RefreshGrokAsync(bool force = false)
+    {
+        if (_grokBusy || _disposed || _paused)
+            return;
+        _grokBusy = true;
+        try
+        {
+            if (!force && UserActivity.IsAway(IdlePause))
+            {
+                if (!_grokIdlePaused)
+                {
+                    _grokIdlePaused = true;
+                    Log.Info("Grok polling paused while user is idle or workstation is locked");
+                }
+
+                _grokTimer.Interval = ToTimerInterval(IdleCheckInterval);
+                return;
+            }
+
+            if (_grokIdlePaused)
+            {
+                _grokIdlePaused = false;
+                Log.Info("Grok polling resumed after user activity");
+            }
+
+            if (_grokAuthPaused && !force)
+            {
+                string signature = await Task.Run(GrokUsageProvider.CredentialWatchSignature);
+                if (signature == _grokAuthCredentialSignature)
+                {
+                    _grokTimer.Interval = _baseIntervalMs;
+                    return;
+                }
+
+                Log.Info("Grok credential signature changed; resuming auth polling");
+                _grokAuthPaused = false;
+            }
+
+            UsageSnapshot snap = await _grok.GetUsageAsync(CancellationToken.None);
+            if (_disposed)
+                return;
+            _grokLastPollAt = DateTimeOffset.UtcNow;
+            _grokSnap = snap;
+            _grokIcons.Update(snap);
+            RefreshDetailsIfVisible();
+
+            if (snap.ErrorKind == UsageErrorKind.Auth)
+            {
+                _grokAuthPaused = true;
+                _grokRetryCount = 0;
+                _grokAuthCredentialSignature = await Task.Run(GrokUsageProvider.CredentialWatchSignature);
+                _grokTimer.Interval = _baseIntervalMs;
+                Log.Warn("Grok auth polling paused until credentials change");
+                NotifyGrokAuthErrorOnce();
+            }
+            else
+            {
+                ResetGrokAuthState();
+                _grokTimer.Interval = NextGrokIntervalMs(snap);
+            }
+        }
+        finally
+        {
+            _grokBusy = false;
+        }
+    }
+
+    private int NextGrokIntervalMs(UsageSnapshot snap)
+    {
+        if (snap.Error is not null)
+        {
+            _grokRetryCount++;
+            int shift = Math.Min(_grokRetryCount - 1, 16);
+            long ms = (long)_baseIntervalMs * (1L << shift);
+            long cap = (long)MaxBackoff.TotalMilliseconds;
+            return (int)Math.Min(ms, cap);
+        }
+
+        _grokRetryCount = 0;
+        return _baseIntervalMs;
+    }
+
+    private void NotifyGrokAuthErrorOnce()
+    {
+        if (_grokAuthNotified)
+            return;
+
+        _grokAuthNotified = true;
+        bool shown = _grokIcons.ShowNotification(Strings.Grok_AuthRequiredTitle, Strings.Grok_AuthRequiredBody);
+        if (!shown)
+            shown = _anchor.ShowNotification(Strings.Grok_AuthRequiredTitle, Strings.Grok_AuthRequiredBody);
+
+        if (!shown)
+            Log.Warn("Grok auth notification was not shown because no tray icon was available");
+    }
+
+    private void ResetGrokAuthState()
+    {
+        _grokAuthPaused = false;
+        _grokAuthNotified = false;
+        _grokAuthCredentialSignature = string.Empty;
+    }
+
     private async Task CheckForUpdatesAsync(bool manual)
     {
         if (_updateInProgress || _disposed || _paused)
@@ -2047,6 +2254,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             return;
         if (_settings.ShowCursor && _cursorIcons.ShowNotification(title, body))
             return;
+        if (_settings.ShowGrok && _grokIcons.ShowNotification(title, body))
+            return;
         Log.Warn("AutoUpdate toast had no visible tray icon to surface through");
     }
 
@@ -2078,7 +2287,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         // and auth-paused gates — the user explicitly asked for fresh data.
         bool forceClaude = _settings.ShowClaude && IsSnapshotMissing(_claudeSnap);
         bool forceCodex = _settings.ShowCodex && IsSnapshotMissing(_codexSnap);
-        _ = RefreshAllAsync(forceClaude, forceCodex);
+        bool forceGrok = _settings.ShowGrok && IsSnapshotMissing(_grokSnap);
+        _ = RefreshAllAsync(forceClaude, forceCodex, forceGrok);
     }
 
     private static bool IsSnapshotMissing(UsageSnapshot? snap) =>
@@ -2100,13 +2310,15 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 
     private IReadOnlyList<TaskbarWidget.Column> BuildWidgetColumns()
     {
-        var list = new List<TaskbarWidget.Column>(3);
+        var list = new List<TaskbarWidget.Column>(4);
         if (_settings.ShowClaude)
             list.Add(BuildColumn(_claudeIcons, _claudeSnap));
         if (_settings.ShowCodex)
             list.Add(BuildColumn(_codexIcons, _codexSnap));
         if (_settings.ShowCursor)
             list.Add(BuildColumn(_cursorIcons, _cursorSnap));
+        if (_settings.ShowGrok)
+            list.Add(BuildColumn(_grokIcons, _grokSnap));
         return list;
     }
 
@@ -2132,7 +2344,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 
     private IReadOnlyList<DetailsForm.Entry> BuildDetailsEntries()
     {
-        var list = new List<DetailsForm.Entry>(6);
+        var list = new List<DetailsForm.Entry>(8);
         if (_settings.ShowClaude)
         {
             list.Add(BuildEntry("Claude", _claudeIcons, _claudeSnap, primary: true));
@@ -2147,6 +2359,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         {
             list.Add(BuildEntry("Cursor", _cursorIcons, _cursorSnap, primary: true));
             list.Add(BuildEntry("Cursor", _cursorIcons, _cursorSnap, primary: false));
+        }
+        if (_settings.ShowGrok)
+        {
+            list.Add(BuildEntry("Grok", _grokIcons, _grokSnap, primary: true));
+            list.Add(BuildEntry("Grok", _grokIcons, _grokSnap, primary: false));
         }
         return list;
     }
@@ -2184,12 +2401,14 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _claudeTimer.Dispose();
             _codexTimer.Dispose();
             _cursorTimer.Dispose();
+            _grokTimer.Dispose();
             _updateTimer.Dispose();
             _settingsReloadTimer.Dispose();
             _settingsWatcher?.Dispose();
             _claudeIcons.Dispose();
             _codexIcons.Dispose();
             _cursorIcons.Dispose();
+            _grokIcons.Dispose();
             _anchor.Visible = false;
             _anchor.Dispose();
             _anchorIcon?.Dispose();

@@ -30,6 +30,9 @@
   <data name="Menu_ShowCursor" xml:space="preserve">
     <value>显示 Cursor 用量</value>
   </data>
+  <data name="Menu_ShowGrok" xml:space="preserve">
+    <value>显示 Grok 用量</value>
+  </data>
   <data name="Menu_IconDisplay" xml:space="preserve">
     <value>图标显示</value>
   </data>
@@ -263,6 +266,30 @@
   </data>
   <data name="Cursor_ReadCredFailedFormat" xml:space="preserve">
     <value>读取 Cursor 凭据失败: {0}</value>
+  </data>
+  <data name="Grok_ReadCredFailed" xml:space="preserve">
+    <value>无法读取 Grok 凭据</value>
+  </data>
+  <data name="Grok_TokenInvalid" xml:space="preserve">
+    <value>Token 失效 (401)，请运行 grok login 重新登录</value>
+  </data>
+  <data name="Grok_ReadAuthFailedFormat" xml:space="preserve">
+    <value>读取 Grok 凭据失败: {0}</value>
+  </data>
+  <data name="Grok_AuthRequiredTitle" xml:space="preserve">
+    <value>需要登录 Grok</value>
+  </data>
+  <data name="Grok_AuthRequiredBody" xml:space="preserve">
+    <value>在终端运行 grok login，然后刷新本程序。</value>
+  </data>
+  <data name="Grok_ResponseMissingConfig" xml:space="preserve">
+    <value>响应缺少 billing config</value>
+  </data>
+  <data name="Grok_AuthNotFound" xml:space="preserve">
+    <value>未找到 ~/.grok/auth.json</value>
+  </data>
+  <data name="Grok_AuthMissingToken" xml:space="preserve">
+    <value>凭据缺少 access token（请运行 grok login 登录）</value>
   </data>
   <data name="Jwt_Invalid" xml:space="preserve">
     <value>JWT 格式无效</value>

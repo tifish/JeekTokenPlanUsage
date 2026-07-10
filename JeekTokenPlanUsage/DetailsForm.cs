@@ -3,7 +3,7 @@ using JeekTokenPlanUsage.Resources;
 
 namespace JeekTokenPlanUsage;
 
-/// Compact borderless popup that shows all three providers' six windows in one
+/// Compact borderless popup that shows each enabled provider's windows in one
 /// glance — utilization %, reset time, and any recent error. Left-clicking any
 /// tray icon toggles it; it auto-hides on focus loss or Escape.
 internal sealed class DetailsForm : Form

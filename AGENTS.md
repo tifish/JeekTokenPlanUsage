@@ -18,6 +18,7 @@
 - [Claude 用量获取](docs/claude-usage.md)
 - [Codex 用量获取](docs/codex-usage.md)
 - [Cursor 用量获取](docs/cursor-usage.md)
+- [Grok 用量获取](docs/grok-usage.md)
 - [自动更新](docs/auto-update.md)
 - [托盘图标实现](docs/tray-icon.md)
 - [任务栏组件实现](docs/taskbar-widget.md)

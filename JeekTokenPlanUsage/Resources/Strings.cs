@@ -20,6 +20,7 @@ internal static class Strings
     public static string Menu_ShowClaude => Get(nameof(Menu_ShowClaude));
     public static string Menu_ShowCodex => Get(nameof(Menu_ShowCodex));
     public static string Menu_ShowCursor => Get(nameof(Menu_ShowCursor));
+    public static string Menu_ShowGrok => Get(nameof(Menu_ShowGrok));
     public static string Menu_IconDisplay => Get(nameof(Menu_IconDisplay));
     public static string Menu_IconDisplayNone => Get(nameof(Menu_IconDisplayNone));
     public static string Menu_IconDisplaySingle => Get(nameof(Menu_IconDisplaySingle));
@@ -110,6 +111,15 @@ internal static class Strings
     public static string Cursor_DbNotFound => Get(nameof(Cursor_DbNotFound));
     public static string Cursor_CredEmpty => Get(nameof(Cursor_CredEmpty));
     public static string Cursor_ReadCredFailedFormat => Get(nameof(Cursor_ReadCredFailedFormat));
+
+    public static string Grok_ReadCredFailed => Get(nameof(Grok_ReadCredFailed));
+    public static string Grok_TokenInvalid => Get(nameof(Grok_TokenInvalid));
+    public static string Grok_ReadAuthFailedFormat => Get(nameof(Grok_ReadAuthFailedFormat));
+    public static string Grok_AuthRequiredTitle => Get(nameof(Grok_AuthRequiredTitle));
+    public static string Grok_AuthRequiredBody => Get(nameof(Grok_AuthRequiredBody));
+    public static string Grok_ResponseMissingConfig => Get(nameof(Grok_ResponseMissingConfig));
+    public static string Grok_AuthNotFound => Get(nameof(Grok_AuthNotFound));
+    public static string Grok_AuthMissingToken => Get(nameof(Grok_AuthMissingToken));
 
     public static string Jwt_Invalid => Get(nameof(Jwt_Invalid));
     public static string Jwt_MissingSub => Get(nameof(Jwt_MissingSub));

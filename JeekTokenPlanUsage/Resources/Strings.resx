@@ -30,6 +30,9 @@
   <data name="Menu_ShowCursor" xml:space="preserve">
     <value>Show Cursor usage</value>
   </data>
+  <data name="Menu_ShowGrok" xml:space="preserve">
+    <value>Show Grok usage</value>
+  </data>
   <data name="Menu_IconDisplay" xml:space="preserve">
     <value>Icon display</value>
   </data>
@@ -263,6 +266,30 @@
   </data>
   <data name="Cursor_ReadCredFailedFormat" xml:space="preserve">
     <value>Failed to read Cursor credentials: {0}</value>
+  </data>
+  <data name="Grok_ReadCredFailed" xml:space="preserve">
+    <value>Cannot read Grok credentials</value>
+  </data>
+  <data name="Grok_TokenInvalid" xml:space="preserve">
+    <value>Token invalid (401). Please re-login with 'grok login'.</value>
+  </data>
+  <data name="Grok_ReadAuthFailedFormat" xml:space="preserve">
+    <value>Failed to read Grok auth: {0}</value>
+  </data>
+  <data name="Grok_AuthRequiredTitle" xml:space="preserve">
+    <value>Grok login required</value>
+  </data>
+  <data name="Grok_AuthRequiredBody" xml:space="preserve">
+    <value>Run 'grok login' in a terminal, then refresh this app.</value>
+  </data>
+  <data name="Grok_ResponseMissingConfig" xml:space="preserve">
+    <value>Response is missing billing config</value>
+  </data>
+  <data name="Grok_AuthNotFound" xml:space="preserve">
+    <value>Not found: ~/.grok/auth.json</value>
+  </data>
+  <data name="Grok_AuthMissingToken" xml:space="preserve">
+    <value>Credentials missing access token (please log in with 'grok login')</value>
   </data>
   <data name="Jwt_Invalid" xml:space="preserve">
     <value>JWT format is invalid</value>
