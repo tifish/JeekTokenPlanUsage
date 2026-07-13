@@ -17,7 +17,6 @@ public static class IconRenderer
     private static readonly Color NumberBackground = Color.FromArgb(255, 0, 0, 0);
     private static readonly Color White = Color.FromArgb(255, 255, 255);
     private static readonly Color WarnAmber = Color.FromArgb(255, 214, 10);
-    private static readonly Color ErrorFrame = Color.FromArgb(120, 120, 120);
     private static readonly Color PauseBadgeBackground = Color.FromArgb(230, 0, 0, 0);
     private static readonly Color PauseBadgeFrame = Color.FromArgb(210, 255, 255, 255);
 
@@ -42,7 +41,6 @@ public static class IconRenderer
         {
             text = placeholder;
             textColor = White;
-            frameColor = ErrorFrame;
         }
         else
         {
