@@ -16,15 +16,22 @@ User-Agent: codex-cli
 ```json
 {
   "rate_limit": {
-    "primary_window": { "used_percent": 35.2, "reset_at": 1717000000 },
-    "secondary_window": { "used_percent": 12.7, "reset_at": 1717500000 }
+    "primary_window": {
+      "used_percent": 35.2,
+      "limit_window_seconds": 604800,
+      "reset_after_seconds": 432000,
+      "reset_at": 1784487749
+    },
+    "secondary_window": null
   }
 }
 ```
 
 - `used_percent` 已经是 0..100 百分比，直接用
 - `reset_at` 是 unix 秒
-- `primary_window` ≈ 5 小时窗口，`secondary_window` ≈ 周窗口
+- `limit_window_seconds` 是窗口总时长；最多一天的窗口显示为 5h，超过一天的窗口显示为 Weekly
+- 旧响应通常是 `primary_window` = 5 小时、`secondary_window` = 周；新响应可能只有一个 7 天 `primary_window`，不能再按字段名固定映射
+- 老响应如果没有 `limit_window_seconds`，仍回退到旧的字段位置映射
 
 ## 凭据来源
 

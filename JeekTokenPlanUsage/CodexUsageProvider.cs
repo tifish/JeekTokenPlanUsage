@@ -170,10 +170,37 @@ public sealed class CodexUsageProvider : IUsageProvider
             if (!doc.RootElement.TryGetProperty("rate_limit", out JsonElement rl) || rl.ValueKind != JsonValueKind.Object)
                 return UsageSnapshot.FromError(Strings.Codex_ResponseMissingRateLimit);
 
+            ParsedWindow? primary = ParseWindow(rl, "primary_window");
+            ParsedWindow? secondary = ParseWindow(rl, "secondary_window");
+            UsageMetric? fiveHour = null;
+            UsageMetric? weekly = null;
+
+            // primary_window used to always be the short window and
+            // secondary_window the weekly window. The backend now puts a
+            // plan's only weekly limit in primary_window, so use the explicit
+            // duration when present and retain the old positional mapping as
+            // a compatibility fallback for older responses.
+            bool primaryClassified = AssignByDuration(primary, ref fiveHour, ref weekly);
+            bool secondaryClassified = AssignByDuration(secondary, ref fiveHour, ref weekly);
+            if (!primaryClassified && primary is not null)
+            {
+                if (fiveHour is null)
+                    fiveHour = primary.Metric;
+                else
+                    weekly ??= primary.Metric;
+            }
+            if (!secondaryClassified && secondary is not null)
+            {
+                if (weekly is null)
+                    weekly = secondary.Metric;
+                else
+                    fiveHour ??= secondary.Metric;
+            }
+
             return new UsageSnapshot
             {
-                FiveHour = ParseWindow(rl, "primary_window"),
-                Weekly = ParseWindow(rl, "secondary_window"),
+                FiveHour = fiveHour,
+                Weekly = weekly,
             };
         }
         catch (JsonException ex)
@@ -182,7 +209,7 @@ public sealed class CodexUsageProvider : IUsageProvider
         }
     }
 
-    private static UsageMetric? ParseWindow(JsonElement rateLimit, string property)
+    private static ParsedWindow? ParseWindow(JsonElement rateLimit, string property)
     {
         if (!rateLimit.TryGetProperty(property, out JsonElement el) || el.ValueKind != JsonValueKind.Object)
             return null;
@@ -194,8 +221,31 @@ public sealed class CodexUsageProvider : IUsageProvider
         DateTimeOffset? reset = null;
         if (el.TryGetProperty("reset_at", out JsonElement r) && r.ValueKind == JsonValueKind.Number)
             reset = DateTimeOffset.FromUnixTimeSeconds(r.GetInt64());
+        else if (el.TryGetProperty("reset_after_seconds", out JsonElement ra) && ra.ValueKind == JsonValueKind.Number)
+            reset = DateTimeOffset.UtcNow.AddSeconds(ra.GetInt64());
 
-        return new UsageMetric(used, reset);
+        long? windowSeconds = el.TryGetProperty("limit_window_seconds", out JsonElement ws)
+            && ws.ValueKind == JsonValueKind.Number
+            ? ws.GetInt64()
+            : null;
+
+        return new ParsedWindow(new UsageMetric(used, reset), windowSeconds);
+    }
+
+    private static bool AssignByDuration(
+        ParsedWindow? window,
+        ref UsageMetric? fiveHour,
+        ref UsageMetric? weekly)
+    {
+        if (window?.LimitWindowSeconds is not > 0)
+            return false;
+
+        if (window.LimitWindowSeconds <= (long)TimeSpan.FromDays(1).TotalSeconds)
+            fiveHour ??= window.Metric;
+        else
+            weekly ??= window.Metric;
+
+        return true;
     }
 
     private static CodexAuth? ReadAuth(out string? error)
@@ -414,6 +464,7 @@ public sealed class CodexUsageProvider : IUsageProvider
     }
 
     private sealed record CodexAuth(string AccessToken, string? AccountId);
+    private sealed record ParsedWindow(UsageMetric Metric, long? LimitWindowSeconds);
     private readonly record struct FetchResult(UsageSnapshot? Snapshot, bool AuthFailed, string? Error)
     {
         public static FetchResult Ok(UsageSnapshot snap) => new(snap, false, null);
