@@ -138,7 +138,6 @@ internal sealed class DetailsForm : Form
     public void UpdateRows(IReadOnlyList<Entry> entries)
     {
         _lastEntries = entries;
-        _boldFont ??= new Font(Font, FontStyle.Bold);
 
         // Only the value labels actually change between refreshes; the row
         // structure (which providers, in what order) is set when the user
@@ -200,8 +199,15 @@ internal sealed class DetailsForm : Form
 
     public void ShowAt(Point cursor, IReadOnlyList<Entry> entries)
     {
-        UpdateRows(entries);
         Rectangle screen = Screen.FromPoint(cursor).WorkingArea;
+
+        // Create/move the native window on the target monitor before measuring
+        // the rows.  The percentage labels use an explicit bold font, so it must
+        // be created for this monitor's DPI rather than the startup monitor's.
+        Location = cursor;
+        _ = Handle;
+        UpdateRows(entries);
+
         // PreferredSize is computed before the window is shown, accounting for
         // the just-applied row content.
         Size size = PreferredSize;
@@ -214,6 +220,32 @@ internal sealed class DetailsForm : Form
         Show();
         ForceForeground();
         InstallMouseHook();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        RecreateBoldFont();
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        RecreateBoldFont();
+    }
+
+    private void RecreateBoldFont()
+    {
+        Font? oldFont = _boldFont;
+        _boldFont = new Font(Font, FontStyle.Bold);
+
+        // Reassign every value label before disposing the old shared font.
+        // Error/no-data rows deliberately continue to use the normal font.
+        for (int i = 0; i < _rows.Count && i < _lastEntries.Count; i++)
+            ApplyValues(_rows[i], _lastEntries[i]);
+
+        oldFont?.Dispose();
+        PerformLayout();
     }
 
     // Tray clicks never grant our form true input activation, so we can't rely
@@ -350,23 +382,27 @@ internal sealed class DetailsForm : Form
             Provider = new Label
             {
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, RowVPad, 8, RowVPad),
                 Text = e.ProviderName,
             },
             Window = new Label
             {
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, RowVPad, 16, RowVPad),
                 Text = e.WindowLabel,
             },
             Value = new Label
             {
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, RowVPad, 16, RowVPad),
             },
             Remaining = new Label
             {
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, RowVPad, 10, RowVPad),
                 // No explicit color: inherit the form's ControlText (default) so the
                 // reset/time text isn't muted and follows the theme on a live switch.
@@ -374,6 +410,7 @@ internal sealed class DetailsForm : Form
             ResetTime = new Label
             {
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, RowVPad, 0, RowVPad),
             },
         };
