@@ -126,6 +126,20 @@
   <data name="Storage_SwitchFailedFormat" xml:space="preserve">
     <value>Failed to switch settings storage: {0}</value>
   </data>
+  <data name="Storage_MoveConfigTitle" xml:space="preserve">
+    <value>Move Config data</value>
+  </data>
+  <data name="Storage_MoveConfigFormat" xml:space="preserve">
+    <value>Move existing Config data to the new location?
+
+From: {0}
+To: {1}
+
+Choose No to only change the setting and leave files in their current location.</value>
+  </data>
+  <data name="Storage_PortableMustMove" xml:space="preserve">
+    <value>Leaving portable mode requires moving the Config folder out of the program directory; otherwise portable mode turns itself back on at the next start. The files will be moved.</value>
+  </data>
   <data name="About_VersionFormat" xml:space="preserve">
     <value>Build {0}</value>
   </data>

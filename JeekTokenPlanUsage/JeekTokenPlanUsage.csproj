@@ -28,7 +28,7 @@
          /p:Version=<git-commit-count> so AssemblyVersion.Major becomes the
          count. AutoUpdate refuses to auto-replace when Major == 0, which
          protects a dev's working tree from being overwritten by a release. -->
-    <Version>0</Version>
+    <Version>0.0.0.0</Version>
   </PropertyGroup>
 
   <!-- NetBeauty: relocate dependency DLLs into ./Libs (relative to OutDir) so

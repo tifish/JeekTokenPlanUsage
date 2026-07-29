@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>JeekTokenPlanUsageMcp</AssemblyName>
+    <RootNamespace>JeekTokenPlanUsageMcp</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Single-file publish straight into the app's bin: the main app uses
+         NetBeauty, which stamps a libloader hook onto every
+         *.runtimeconfig.json it finds in bin, and a hooked adapter would hold
+         libloader.dll open for the whole agent session and break the next app
+         build. Single-file keeps the runtimeconfig inside the exe, so NetBeauty
+         never sees it. Build with `dotnet publish`, not `dotnet build`. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishDir>..\..\bin</PublishDir>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Single source of truth for pipe names, shared with the app. -->
+    <Compile Include="..\..\JeekTokenPlanUsage\McpPipeNames.cs" Link="McpPipeNames.cs" />
+  </ItemGroup>
+</Project>

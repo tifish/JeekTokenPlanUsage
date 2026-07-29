@@ -55,6 +55,9 @@ internal static class Strings
 
     public static string Storage_SelectCustomFolder => Get(nameof(Storage_SelectCustomFolder));
     public static string Storage_SwitchFailedFormat => Get(nameof(Storage_SwitchFailedFormat));
+    public static string Storage_MoveConfigTitle => Get(nameof(Storage_MoveConfigTitle));
+    public static string Storage_MoveConfigFormat => Get(nameof(Storage_MoveConfigFormat));
+    public static string Storage_PortableMustMove => Get(nameof(Storage_PortableMustMove));
 
     public static string About_VersionFormat => Get(nameof(About_VersionFormat));
     public static string About_DevBuild => Get(nameof(About_DevBuild));

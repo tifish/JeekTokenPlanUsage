@@ -126,6 +126,20 @@
   <data name="Storage_SwitchFailedFormat" xml:space="preserve">
     <value>切换设置存储失败：{0}</value>
   </data>
+  <data name="Storage_MoveConfigTitle" xml:space="preserve">
+    <value>移动 Config 数据</value>
+  </data>
+  <data name="Storage_MoveConfigFormat" xml:space="preserve">
+    <value>是否将现有 Config 数据移动到新位置？
+
+源：{0}
+目标：{1}
+
+选择"否"将只修改设置，文件仍保留在当前位置。</value>
+  </data>
+  <data name="Storage_PortableMustMove" xml:space="preserve">
+    <value>退出便携模式必须把 Config 目录移出程序目录，否则下次启动会自动变回便携模式。文件将被移动。</value>
+  </data>
   <data name="About_VersionFormat" xml:space="preserve">
     <value>构建 {0}</value>
   </data>

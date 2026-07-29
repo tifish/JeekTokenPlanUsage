@@ -1,96 +1,91 @@
-# JeekTokenPlanUsage MCP HTTP Interface
+# JeekTokenPlanUsage MCP Interface
 
-This release exposes a local MCP HTTP endpoint for AI clients.
+The app exposes MCP over a Windows named pipe, not a TCP port: nothing to
+allocate, no firewall prompts, and access control comes from the pipe ACL
+(current user + SYSTEM only). `JeekTokenPlanUsageMcp.exe` in this directory is
+a stdio adapter an agent launches like any stdio MCP server; it forwards
+JSON-RPC to the running app's pipe.
 
-## How to Discover the Endpoint
-
-Start `JeekTokenPlanUsage.exe`, then read:
-
-```text
-%LocalAppData%\JeekTokenPlanUsage\Config\mcp-http.json
-```
-
-The file contains:
+## Client Configuration
 
 ```json
 {
-  "endpoint": "http://127.0.0.1:39271/mcp",
-  "authorizationHeader": "Authorization",
-  "authorizationValue": "Bearer <token>",
-  "protocolVersion": "2025-06-18"
+    "mcpServers": {
+        "jeek-token-plan-usage": {
+            "type": "stdio",
+            "command": "C:\\path\\to\\bin\\JeekTokenPlanUsageMcp.exe"
+        }
+    }
 }
 ```
 
-The port starts at `39271` and may move up to `39280` if earlier ports are in use.
-Always use the `endpoint` value from `mcp-http.json`.
+With a relative path, wrap it in `cmd /c` (Windows resolves relative
+executables against the parent's directory, not the configured cwd):
 
-## Transport
+```json
+{
+    "mcpServers": {
+        "jtpu-debug": {
+            "type": "stdio",
+            "command": "cmd",
+            "args": ["/c", ".\\bin\\JeekTokenPlanUsageMcp.exe", "--surface", "debug"],
+            "cwd": "."
+        }
+    }
+}
+```
 
-- Protocol: MCP over Streamable HTTP
-- Endpoint path: `/mcp`
-- Method: `POST`
-- Body format: JSON-RPC 2.0
-- Required header: `Authorization: Bearer <token>`
+Adapter options:
 
-The server only listens on `127.0.0.1`. It rejects non-loopback `Host` headers and non-loopback browser `Origin` headers.
+| Option | Meaning |
+|---|---|
+| `--surface product\|debug` | Which endpoint to reach. Default `product`. |
+| `--pipe <name>` | Explicit pipe name override. |
+| `--instance <id>` | Explicit instance id override. |
+| `--app <path>` | Path to `JeekTokenPlanUsage.exe` for auto-launch. |
+| `--launch` / `--no-launch` | Auto-start the app on a tool call. Default: on for `product`, off for `debug`. |
 
-## Tools
+The adapter derives the pipe name from its own folder, so a copy only ever
+reaches the app in the same folder. It answers `initialize`/`ping` locally
+while the app is closed (the session stays usable) and reconnects on its own
+after an app restart.
+
+## Surfaces
+
+Two independent endpoints share the transport but never share tools:
+
+- **Product** (`JeekTokenPlanUsage.Mcp`): the app's features for a user's
+  agent. Listens in every build.
+- **Debug** (`JeekTokenPlanUsage.Mcp.Debug`): object-graph access for
+  development. Only listens in Debug builds. Debug builds suffix both pipe
+  names with a 12-hex hash of the executable directory so parallel worktrees
+  stay isolated.
+
+## Product Tools
 
 ### `get_usage`
 
 Returns the current cached usage snapshot.
 
-Arguments:
-
 ```json
-{
-  "provider": "claude | codex | cursor",
-  "refresh": false
-}
+{ "provider": "claude | codex | cursor | grok", "refresh": false }
 ```
 
-Both arguments are optional. Omit `provider` to return all providers. Set `refresh` to `true` to refresh before returning.
+Both arguments are optional. Omit `provider` to return all providers.
 
 ### `refresh_usage`
 
-Refreshes one provider or all providers, then returns the updated snapshot.
-
-Arguments:
-
-```json
-{
-  "provider": "claude | codex | cursor"
-}
-```
-
-The argument is optional. Omit `provider` to refresh all providers.
+Refreshes one provider (optional `provider`) or all providers, then returns
+the updated snapshot.
 
 ### `get_ui_state`
 
-Returns the current tray UI and settings state for automation.
-
-The structured result includes:
-
-- `detailsVisible`
-- `anchorVisible`
-- `logPath`
-- `settings`
-- `allowedValues`
+Returns the current tray UI and settings state: `detailsVisible`,
+`anchorVisible`, `logPath`, `settings`, `allowedValues`.
 
 ### `ui_action`
 
 Invokes a tray-menu-equivalent action on the UI thread.
-
-Arguments:
-
-```json
-{
-  "action": "set_icon_display",
-  "mode": "single"
-}
-```
-
-Supported actions:
 
 | action | Required or useful arguments |
 |---|---|
@@ -106,33 +101,25 @@ Supported actions:
 | `set_auto_update` | `enabled` |
 | `set_proxy` | `mode`: `direct`, `system`, `custom`; optional `protocol`, `host`, `port` |
 | `set_storage` | `mode`: `appData`, `portable`, `custom`; optional `customRoot` |
-| `show_details` | none |
-| `hide_details` | none |
-| `toggle_details` | none |
+| `show_details` / `hide_details` / `toggle_details` | none |
 | `open_log` | none |
 | `check_update` | optional `allowUpdateLaunch`, default `false` |
 | `show_about` | none |
 | `exit_app` | none |
 
-`check_update` does not launch the updater unless `allowUpdateLaunch` is `true`, so automated tests can inspect update status safely.
+`check_update` does not launch the updater unless `allowUpdateLaunch` is
+`true`, so automated tests can inspect update status safely.
 
-## Example JSON-RPC Call
+## Debug Tools (Debug builds only)
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "get_usage",
-    "arguments": {}
-  }
-}
-```
+`describe`, `get_value`, `set_value`, `invoke`, `list_members`, `read_logs` —
+the standard object-graph tools. Paths start at the root `Context`
+(the `TrayApplicationContext`); e.g. `Context._settings.PollMinutes`.
+`#Name` segments look up WinForms child controls by name.
 
 ## Response Shape
 
-The tool result includes `structuredContent`:
+Product tool results include `structuredContent`:
 
 ```json
 {
@@ -143,29 +130,14 @@ The tool result includes `structuredContent`:
       "id": "claude",
       "name": "Claude",
       "enabled": true,
-      "lastPollAt": "2026-06-29T00:00:00.0000000+00:00",
-      "timestamp": "2026-06-29T00:00:00.0000000+00:00",
       "error": null,
-      "errorKind": null,
       "windows": [
-        {
-          "id": "five_hour",
-          "label": "5h",
-          "utilization": 12.3,
-          "resetsAt": "2026-06-29T05:00:00.0000000+00:00"
-        },
-        {
-          "id": "weekly",
-          "label": "Weekly",
-          "utilization": 45.6,
-          "resetsAt": "2026-07-01T00:00:00.0000000+00:00"
-        }
+        { "id": "five_hour", "label": "5h", "utilization": 12.3, "resetsAt": "2026-06-29T05:00:00.0000000+00:00" }
       ]
     }
   ]
 }
 ```
 
-If the app is paused, `paused` is `true` and refresh requests follow the app's paused behavior.
-
-The MCP interface does not expose access tokens, credential file contents, or raw provider responses.
+The MCP interface does not expose access tokens, credential file contents, or
+raw provider responses.

@@ -1,6 +1,7 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using JeekTools;
 using Microsoft.Win32;
+using System.Text.Json.Serialization;
 
 namespace JeekTokenPlanUsage;
 
@@ -28,7 +29,8 @@ public enum ProxyMode
 }
 
 /// Where roaming settings are stored. Machine-local settings always stay under
-/// %LocalAppData%\JeekTokenPlanUsage\Config.
+/// %LocalAppData%\JeekTokenPlanUsage\Config. Serialized names are part of the
+/// on-disk settings format; maps to JeekTools.StorageLocation internally.
 public enum SettingsStorageMode
 {
     AppData = 0,
@@ -39,21 +41,24 @@ public enum SettingsStorageMode
 internal sealed class AppSettings
 {
     private const string AppName = "JeekTokenPlanUsage";
-    private const string ConfigDirectoryName = "Config";
-    private const string SettingsFileName = "settings.json";
-    private const string LocalSettingsFileName = "local-settings.json";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunKeyName = "JeekTokenPlanUsage";
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
-    };
+    /// JeekTools path scheme: machine settings always live under
+    /// %LocalAppData%\<App>\Config\settings.json; roaming settings live in the
+    /// active storage location's Config dir; a Config folder next to the exe
+    /// forces portable mode regardless of the saved mode.
+    private static readonly SettingsStorage Storage = new(AppName);
+
+    /// Tick of the last save this process performed. The settings watcher uses
+    /// it to ignore file events caused by our own writes.
+    public static long LastWriteTick { get; private set; }
 
     private string _roamingConfigDirectory = "";
     private string _roamingSettingsPath = "";
     private SettingsStorageMode _savedStorageMode = SettingsStorageMode.AppData;
+    private MachineSettingsFile _machineBaseline = new();
+    private RoamingSettingsFile _roamingBaseline = new();
 
     public bool ShowClaude { get; set; } = true;
     public bool ShowCodex { get; set; } = true;
@@ -126,7 +131,7 @@ internal sealed class AppSettings
     public SettingsStorageMode StorageMode { get; private set; } = SettingsStorageMode.AppData;
 
     /// Custom storage root selected by the user. This path does not include the
-    /// trailing Config segment; ResolveRoamingConfigDirectory appends it.
+    /// trailing Config segment; SettingsStorage.ResolveConfigRoot appends it.
     [JsonIgnore]
     public string CustomStorageRoot { get; private set; } = "";
 
@@ -136,32 +141,38 @@ internal sealed class AppSettings
     [JsonIgnore]
     public string RoamingSettingsPath => _roamingSettingsPath;
 
-    private static string AppDataConfigDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        AppName,
-        ConfigDirectoryName
-    );
+    public static string PortableConfigPath => Storage.ProgramConfigDir;
 
-    private static string LocalConfigDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        AppName,
-        ConfigDirectoryName
-    );
+    /// Machine settings used to live in local-settings.json before the move to
+    /// the JeekTools SettingsStorage layout (settings.json in the same dir).
+    private static string LegacyMachineSettingsPath =>
+        Path.Combine(Storage.LocalConfigDir, "local-settings.json");
 
-    private static string PortableConfigDirectory => Path.Combine(
-        AppContext.BaseDirectory,
-        ConfigDirectoryName
-    );
+    /// Pre-split releases kept one flat settings.json directly under
+    /// %AppData%\JeekTokenPlanUsage (no Config segment).
+    private static string LegacySettingsPath =>
+        Path.Combine(Storage.RoamingDir, "settings.json");
 
-    private static string LocalSettingsPath => Path.Combine(LocalConfigDirectory, LocalSettingsFileName);
+    private static StorageLocation ToLocation(SettingsStorageMode mode) => mode switch
+    {
+        SettingsStorageMode.Portable => StorageLocation.ProgramDirectory,
+        SettingsStorageMode.Custom => StorageLocation.CustomDirectory,
+        _ => StorageLocation.UserDirectory,
+    };
 
-    private static string LegacySettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        AppName,
-        "settings.json"
-    );
+    private static SettingsStorageMode FromLocation(StorageLocation location) => location switch
+    {
+        StorageLocation.ProgramDirectory => SettingsStorageMode.Portable,
+        StorageLocation.CustomDirectory => SettingsStorageMode.Custom,
+        _ => SettingsStorageMode.AppData,
+    };
 
-    public static string PortableConfigPath => PortableConfigDirectory;
+    /// Where the roaming Config directory would live under the given mode.
+    /// Used by the storage menu to show the target path before switching.
+    public string PreviewConfigRoot(SettingsStorageMode mode, string? customRoot = null) =>
+        Storage.ResolveConfigRoot(
+            ToLocation(mode),
+            string.IsNullOrWhiteSpace(customRoot) ? CustomStorageRoot : customRoot.Trim());
 
     /// Build the proxy URI from the custom fields, or null when they don't form
     /// a usable proxy (empty host / out-of-range port) so the caller falls back
@@ -209,7 +220,8 @@ internal sealed class AppSettings
     public static string PeekLanguage()
     {
         MachineSettingsFile machine = LoadMachineSettings();
-        string settingsPath = ResolveRoamingSettingsPath(machine);
+        string settingsPath = Storage.ResolveSettingsPath(
+            ResolveEffectiveLocation(machine), machine.CustomStorageRoot);
         return PeekLanguageFromPath(settingsPath)
             ?? PeekLanguageFromPath(LegacySettingsPath)
             ?? "";
@@ -217,26 +229,28 @@ internal sealed class AppSettings
 
     public static AppSettings Load()
     {
-        bool machineFileExists = File.Exists(LocalSettingsPath);
         MachineSettingsFile machine = LoadMachineSettings();
-        SettingsStorageMode effectiveMode = ResolveEffectiveStorageMode(machine);
-        string roamingSettingsPath = ResolveRoamingSettingsPath(machine, effectiveMode);
+        StorageLocation effectiveLocation = ResolveEffectiveLocation(machine);
+        string roamingSettingsPath = Storage.ResolveSettingsPath(effectiveLocation, machine.CustomStorageRoot);
         string roamingConfigDirectory = Path.GetDirectoryName(roamingSettingsPath)!;
 
-        bool shouldSave = !machineFileExists;
-        AppSettings? loaded = TryReadSettings(roamingSettingsPath);
+        bool machineFileMissing = !File.Exists(Storage.MachineSettingsPath);
+        bool shouldSave = machineFileMissing;
+
+        bool loadedRoaming = JsonSettingsFile.TryLoad(roamingSettingsPath, out RoamingSettingsFile roaming);
         bool loadedFromLegacy = false;
-        if (loaded is null)
+        if (!loadedRoaming)
         {
-            loaded = TryReadSettings(LegacySettingsPath);
-            loadedFromLegacy = loaded is not null;
+            loadedFromLegacy = JsonSettingsFile.TryLoad(LegacySettingsPath, out RoamingSettingsFile legacyRoaming)
+                && File.Exists(LegacySettingsPath);
+            if (loadedFromLegacy)
+                roaming = legacyRoaming;
             shouldSave = true;
         }
 
-        if (loaded is null)
+        if (!loadedRoaming && !loadedFromLegacy)
         {
-            shouldSave = true;
-            loaded = new AppSettings
+            roaming = new RoamingSettingsFile
             {
                 ShowClaude = ClaudeUsageProvider.HasLocalCredentials(),
                 ShowCodex = CodexUsageProvider.HasLocalCredentials(),
@@ -245,15 +259,32 @@ internal sealed class AppSettings
             };
         }
 
-        if (!machineFileExists && loadedFromLegacy)
-            machine = MachineSettingsFile.FromLegacy(loaded, machine);
+        // The legacy flat file carried machine-bound fields too; adopt them the
+        // first time the split machine file is created.
+        if (machineFileMissing && loadedFromLegacy
+            && !File.Exists(LegacyMachineSettingsPath)
+            && JsonSettingsFile.TryLoad(LegacySettingsPath, out MachineSettingsFile legacyMachine))
+        {
+            legacyMachine.StorageMode = machine.StorageMode;
+            legacyMachine.CustomStorageRoot = machine.CustomStorageRoot;
+            machine = legacyMachine;
+        }
 
-        loaded.ApplyMachineSettings(machine);
-        loaded.SetStorage(machine, effectiveMode, roamingConfigDirectory, roamingSettingsPath);
-        shouldSave |= loaded.NormalizeLegacyFields();
+        var settings = new AppSettings();
+        settings.ApplyRoamingSettings(roaming);
+        settings.ApplyMachineSettings(machine);
+        settings.SetStorage(machine, FromLocation(effectiveLocation), roamingConfigDirectory, roamingSettingsPath);
+        settings._machineBaseline = JsonSettingsFile.Clone(machine);
+        settings._roamingBaseline = JsonSettingsFile.Clone(roaming);
+        shouldSave |= settings.NormalizeLegacyFields();
         if (shouldSave)
-            loaded.Save();
-        return loaded;
+            settings.Save();
+
+        // Once the new-layout machine file exists the legacy one is dead weight.
+        if (machineFileMissing && File.Exists(Storage.MachineSettingsPath))
+            try { File.Delete(LegacyMachineSettingsPath); } catch { }
+
+        return settings;
     }
 
     public void ReloadFromDisk()
@@ -262,7 +293,12 @@ internal sealed class AppSettings
         CopyFrom(loaded);
     }
 
-    public void SwitchStorageMode(SettingsStorageMode mode, string? customRoot = null)
+    /// Switches the roaming storage mode. When moveFiles is true the whole
+    /// Config directory is moved (same-volume rename, cross-volume copy
+    /// fallback) via SettingsStorage.MoveConfigRoot; leaving portable mode
+    /// always moves, because a Config dir next to the exe would force portable
+    /// mode again on next start. Throws on failure - callers surface the error.
+    public void SwitchStorageMode(SettingsStorageMode mode, string? customRoot = null, bool moveFiles = true)
     {
         if (mode == SettingsStorageMode.Custom)
         {
@@ -273,61 +309,50 @@ internal sealed class AppSettings
         }
 
         string oldRoamingConfigDirectory = _roamingConfigDirectory;
-        SettingsStorageMode oldMode = StorageMode;
-        string oldPortableConfigDirectory = PortableConfigDirectory;
+        bool leavingPortable = StorageMode == SettingsStorageMode.Portable
+            && mode != SettingsStorageMode.Portable;
 
-        MachineSettingsFile machine = CaptureMachineSettings();
-        machine.StorageMode = mode;
-        if (customRoot is not null)
-            machine.CustomStorageRoot = customRoot;
-
-        string newRoamingConfigDirectory = ResolveRoamingConfigDirectory(machine, forcePortableWhenPresent: false);
-        string newRoamingSettingsPath = Path.Combine(newRoamingConfigDirectory, SettingsFileName);
+        string effectiveCustomRoot = mode == SettingsStorageMode.Custom ? customRoot! : CustomStorageRoot;
+        string newRoamingConfigDirectory = Storage.ResolveConfigRoot(ToLocation(mode), effectiveCustomRoot);
+        string newRoamingSettingsPath = Storage.ResolveSettingsPath(ToLocation(mode), effectiveCustomRoot);
 
         if (!SamePath(oldRoamingConfigDirectory, newRoamingConfigDirectory)
-            && Directory.Exists(oldRoamingConfigDirectory))
+            && (moveFiles || leavingPortable))
         {
-            CopyDirectoryContents(oldRoamingConfigDirectory, newRoamingConfigDirectory);
+            SettingsStorage.MoveConfigRoot(oldRoamingConfigDirectory, newRoamingConfigDirectory);
+        }
+        else
+        {
+            // Portable mode is detected by the directory's existence, so it must
+            // exist even when the user chose to leave old files behind.
+            Directory.CreateDirectory(newRoamingConfigDirectory);
         }
 
-        SetStorage(machine, mode, newRoamingConfigDirectory, newRoamingSettingsPath);
+        _savedStorageMode = mode;
+        StorageMode = mode;
+        if (mode == SettingsStorageMode.Custom)
+            CustomStorageRoot = customRoot!;
+        _roamingConfigDirectory = newRoamingConfigDirectory;
+        _roamingSettingsPath = newRoamingSettingsPath;
         Save();
-
-        if (oldMode == SettingsStorageMode.Portable
-            && mode != SettingsStorageMode.Portable
-            && Directory.Exists(oldPortableConfigDirectory)
-            && !SamePath(oldPortableConfigDirectory, newRoamingConfigDirectory))
-        {
-            Directory.Delete(oldPortableConfigDirectory, recursive: true);
-        }
     }
 
     public void Save()
     {
-        SaveRoamingSettings();
-        SaveMachineSettings(CaptureMachineSettings());
-    }
+        MachineSettingsFile machine = CaptureMachineSettings();
+        if (JsonSettingsFile.TryMergeAndWrite(
+                Storage.MachineSettingsPath, _machineBaseline, machine,
+                static _ => { }, forceAllLocal: false, out MachineSettingsFile mergedMachine))
+            _machineBaseline = mergedMachine;
 
-    private void SaveRoamingSettings()
-    {
-        try
-        {
-            Directory.CreateDirectory(_roamingConfigDirectory);
-            File.WriteAllText(
-                _roamingSettingsPath,
-                JsonSerializer.Serialize(RoamingSettingsFile.From(this), JsonOptions));
-        }
-        catch { }
-    }
+        RoamingSettingsFile roaming = RoamingSettingsFile.From(this);
+        bool forceAllLocal = !File.Exists(_roamingSettingsPath);
+        if (JsonSettingsFile.TryMergeAndWrite(
+                _roamingSettingsPath, _roamingBaseline, roaming,
+                static _ => { }, forceAllLocal, out RoamingSettingsFile mergedRoaming))
+            _roamingBaseline = mergedRoaming;
 
-    private static void SaveMachineSettings(MachineSettingsFile machine)
-    {
-        try
-        {
-            Directory.CreateDirectory(LocalConfigDirectory);
-            File.WriteAllText(LocalSettingsPath, JsonSerializer.Serialize(machine, JsonOptions));
-        }
-        catch { }
+        LastWriteTick = Environment.TickCount64;
     }
 
     private static string? PeekLanguageFromPath(string path)
@@ -348,74 +373,34 @@ internal sealed class AppSettings
         }
     }
 
-    private static AppSettings? TryReadSettings(string path)
-    {
-        if (!File.Exists(path))
-            return null;
-        try
-        {
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static MachineSettingsFile LoadMachineSettings()
     {
-        MachineSettingsFile settings = TryReadMachineSettings() ?? new MachineSettingsFile();
-        if (settings.StorageMode == SettingsStorageMode.Custom
-            && string.IsNullOrWhiteSpace(settings.CustomStorageRoot))
-            settings.StorageMode = SettingsStorageMode.AppData;
-        return settings;
+        if (!JsonSettingsFile.TryLoad(Storage.MachineSettingsPath, out MachineSettingsFile machine)
+            && JsonSettingsFile.TryLoad(LegacyMachineSettingsPath, out MachineSettingsFile legacy))
+            machine = legacy;
+
+        if (machine.StorageMode == SettingsStorageMode.Custom
+            && string.IsNullOrWhiteSpace(machine.CustomStorageRoot))
+            machine.StorageMode = SettingsStorageMode.AppData;
+        return machine;
     }
 
-    private static MachineSettingsFile? TryReadMachineSettings()
+    private static StorageLocation ResolveEffectiveLocation(MachineSettingsFile machine) =>
+        Storage.ResolveEffectiveLocation(ToLocation(machine.StorageMode));
+
+    private void ApplyRoamingSettings(RoamingSettingsFile roaming)
     {
-        if (!File.Exists(LocalSettingsPath))
-            return null;
-        try
-        {
-            return JsonSerializer.Deserialize<MachineSettingsFile>(
-                File.ReadAllText(LocalSettingsPath),
-                JsonOptions);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static SettingsStorageMode ResolveEffectiveStorageMode(MachineSettingsFile machine) =>
-        Directory.Exists(PortableConfigDirectory)
-            ? SettingsStorageMode.Portable
-            : machine.StorageMode;
-
-    private static string ResolveRoamingSettingsPath(
-        MachineSettingsFile machine,
-        SettingsStorageMode? effectiveMode = null) =>
-        Path.Combine(
-            ResolveRoamingConfigDirectory(machine, effectiveMode: effectiveMode),
-            SettingsFileName);
-
-    private static string ResolveRoamingConfigDirectory(
-        MachineSettingsFile machine,
-        bool forcePortableWhenPresent = true,
-        SettingsStorageMode? effectiveMode = null)
-    {
-        SettingsStorageMode mode = effectiveMode
-            ?? (forcePortableWhenPresent && Directory.Exists(PortableConfigDirectory)
-            ? SettingsStorageMode.Portable
-            : machine.StorageMode);
-
-        return mode switch
-        {
-            SettingsStorageMode.Portable => PortableConfigDirectory,
-            SettingsStorageMode.Custom when !string.IsNullOrWhiteSpace(machine.CustomStorageRoot) =>
-                Path.Combine(machine.CustomStorageRoot, ConfigDirectoryName),
-            _ => AppDataConfigDirectory,
-        };
+        ShowClaude = roaming.ShowClaude;
+        ShowCodex = roaming.ShowCodex;
+        ShowCursor = roaming.ShowCursor;
+        ShowGrok = roaming.ShowGrok;
+        IconMode = roaming.IconMode;
+        PollMinutes = roaming.PollMinutes;
+        Language = roaming.Language;
+        EnableThresholdNotifications = roaming.EnableThresholdNotifications;
+        ClaudePollMinutes = roaming.ClaudePollMinutes;
+        AutoUpdate = roaming.AutoUpdate;
+        DisableMirrorDownload = roaming.DisableMirrorDownload;
     }
 
     private void ApplyMachineSettings(MachineSettingsFile machine)
@@ -496,27 +481,8 @@ internal sealed class AppSettings
         CustomStorageRoot = other.CustomStorageRoot;
         _roamingConfigDirectory = other._roamingConfigDirectory;
         _roamingSettingsPath = other._roamingSettingsPath;
-    }
-
-    private static void CopyDirectoryContents(string sourceDirectory, string destinationDirectory)
-    {
-        Directory.CreateDirectory(destinationDirectory);
-
-        foreach (string sourceFile in Directory.EnumerateFiles(sourceDirectory))
-        {
-            string destinationFile = Path.Combine(destinationDirectory, Path.GetFileName(sourceFile));
-            File.Copy(sourceFile, destinationFile, overwrite: true);
-        }
-
-        foreach (string sourceSubdirectory in Directory.EnumerateDirectories(sourceDirectory))
-        {
-            if (IsSameOrChildPath(destinationDirectory, sourceSubdirectory))
-                continue;
-            string destinationSubdirectory = Path.Combine(
-                destinationDirectory,
-                Path.GetFileName(sourceSubdirectory));
-            CopyDirectoryContents(sourceSubdirectory, destinationSubdirectory);
-        }
+        _machineBaseline = other._machineBaseline;
+        _roamingBaseline = other._roamingBaseline;
     }
 
     private static bool SamePath(string left, string right)
@@ -524,17 +490,6 @@ internal sealed class AppSettings
         string Normalize(string path) =>
             Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return string.Equals(Normalize(left), Normalize(right), StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsSameOrChildPath(string child, string parent)
-    {
-        string normalizedParent = Path.GetFullPath(parent)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        string normalizedChild = Path.GetFullPath(child)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        return normalizedChild.StartsWith(normalizedParent, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class MachineSettingsFile
@@ -551,19 +506,6 @@ internal sealed class AppSettings
         public string ProxyProtocol { get; set; } = "socks5";
         public string ProxyHost { get; set; } = "127.0.0.1";
         public int ProxyPort { get; set; } = 7890;
-
-        public static MachineSettingsFile FromLegacy(AppSettings legacy, MachineSettingsFile current) => new()
-        {
-            StorageMode = current.StorageMode,
-            CustomStorageRoot = current.CustomStorageRoot,
-            Paused = legacy.Paused,
-            ShowTaskbarWidget = legacy.ShowTaskbarWidget,
-            TaskbarWidgetOffset = legacy.TaskbarWidgetOffset,
-            ProxyMode = legacy.ProxyMode,
-            ProxyProtocol = legacy.ProxyProtocol,
-            ProxyHost = legacy.ProxyHost,
-            ProxyPort = legacy.ProxyPort,
-        };
     }
 
     private sealed class RoamingSettingsFile

@@ -1,0 +1,10 @@
+{
+    "mcpServers": {
+        "jtpu-debug": {
+            "type": "stdio",
+            "command": "cmd",
+            "args": ["/c", ".\\bin\\JeekTokenPlanUsageMcp.exe", "--surface", "debug"],
+            "cwd": "."
+        }
+    }
+}

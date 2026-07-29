@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using JeekTokenPlanUsage.Resources;
+using JeekTools;
 using Microsoft.Win32;
 using WinTimer = System.Windows.Forms.Timer;
 
@@ -73,7 +74,6 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private readonly DetailsForm _detailsForm;
     private readonly TaskbarWidget _taskbarWidget;
     private readonly SystemChangeListener _systemChangeListener;
-    private readonly McpHttpServer _mcpServer;
     private readonly SynchronizationContext? _uiContext;
     private AboutForm? _aboutForm;
 
@@ -429,8 +429,12 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         };
         initialDelayTimer.Start();
 
-        _mcpServer = new McpHttpServer(this);
-        _mcpServer.Start();
+        // Two named-pipe MCP surfaces, never merged: the debug one (Debug
+        // builds only) exposes the object graph, the product one exposes app
+        // features to a user's agent. bin\JeekTokenPlanUsageMcp.exe adapts
+        // stdio to these pipes.
+        DebugMcpServer.Start(this, _uiContext);
+        ProductMcpServer.Start(this);
     }
 
     private static void ShowAbout()
@@ -508,6 +512,12 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private void OnSettingsDirectoryChanged(object sender, FileSystemEventArgs e)
     {
         if (_disposed)
+            return;
+
+        // Ignore the file events our own saves generate; only external edits
+        // (another instance, a sync tool, a text editor) should trigger a reload.
+        long lastWrite = AppSettings.LastWriteTick;
+        if (lastWrite > 0 && Environment.TickCount64 - lastWrite < 1000)
             return;
 
         _uiContext?.Post(_ =>
@@ -911,7 +921,36 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     {
         try
         {
-            _settings.SwitchStorageMode(mode, customRoot);
+            // Interactive switches ask whether to move the existing Config
+            // directory; MCP-driven switches (showErrorDialog == false) always
+            // move. Leaving portable mode must move regardless, or the Config
+            // dir next to the exe forces portable mode again on next start.
+            bool moveFiles = true;
+            string oldRoot = _settings.RoamingConfigDirectory;
+            string newRoot = _settings.PreviewConfigRoot(mode, customRoot);
+            if (showErrorDialog && !string.Equals(oldRoot, newRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                moveFiles = MessageBox.Show(
+                    string.Format(Strings.Storage_MoveConfigFormat, oldRoot, newRoot),
+                    Strings.Storage_MoveConfigTitle,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) == DialogResult.Yes;
+
+                if (!moveFiles
+                    && _settings.StorageMode == SettingsStorageMode.Portable
+                    && mode != SettingsStorageMode.Portable)
+                {
+                    if (MessageBox.Show(
+                            Strings.Storage_PortableMustMove,
+                            Strings.Storage_MoveConfigTitle,
+                            MessageBoxButtons.OKCancel,
+                            MessageBoxIcon.Information) != DialogResult.OK)
+                        return;
+                    moveFiles = true;
+                }
+            }
+
+            _settings.SwitchStorageMode(mode, customRoot, moveFiles);
             StartSettingsWatcher();
             UpdateStorageMenuChecks();
             Log.Info($"Settings storage switched to {_settings.StorageMode}: {_settings.RoamingConfigDirectory}");
@@ -1635,7 +1674,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _updateInProgress = true;
         try
         {
-            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync(_settings.DisableMirrorDownload);
+            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync();
             string message = outcome switch
             {
                 UpdateCheckOutcome.Available => $"Update available: local={AutoUpdate.LocalCommitCount}, remote={AutoUpdate.RemoteCommitCount}.",
@@ -1646,8 +1685,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 
             if (allowUpdateLaunch && outcome == UpdateCheckOutcome.Available)
             {
-                bool launched = AutoUpdate.LaunchUpdate();
-                message += launched ? " Updater launched." : " Updater launch failed.";
+                bool launched = await AutoUpdate.DownloadAndInstallAsync(_settings.DisableMirrorDownload);
+                message += launched ? " Updater launched." : $" Updater launch failed: {AutoUpdate.FailureReason}";
             }
 
             return message;
@@ -2188,7 +2227,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         try
         {
             Log.Info($"AutoUpdate check started (manual={manual})");
-            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync(_settings.DisableMirrorDownload);
+            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync();
             if (_disposed)
                 return;
 
@@ -2199,11 +2238,12 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                         Strings.Update_FoundBodyFormat,
                         AutoUpdate.RemoteCommitCount > 0 ? AutoUpdate.RemoteCommitCount.ToString() : "?");
                     ShowUpdateToast(Strings.Update_FoundTitle, body);
-                    // Give the toast a moment to render before the process exits.
+                    // Give the toast a moment to render before the download runs
+                    // and the process exits.
                     await Task.Delay(800);
                     if (_disposed)
                         return;
-                    bool launched = AutoUpdate.LaunchUpdate();
+                    bool launched = await AutoUpdate.DownloadAndInstallAsync(_settings.DisableMirrorDownload);
                     if (!launched && manual)
                     {
                         ShowUpdateToast(
@@ -2397,7 +2437,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _disposed = true;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.SessionSwitch -= OnSessionSwitch;
-            _mcpServer.Dispose();
+            DebugMcpServer.Stop();
+            ProductMcpServer.Stop();
             _claudeTimer.Dispose();
             _codexTimer.Dispose();
             _cursorTimer.Dispose();
