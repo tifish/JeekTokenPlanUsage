@@ -18,7 +18,6 @@
     <!-- Project lives in a subdirectory; output goes to the repo-root bin/. -->
     <OutDir>..\bin</OutDir>
     <PublishDir>$(OutDir)</PublishDir>
-    <PublishReadyToRun>true</PublishReadyToRun>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <CETCompat>false</CETCompat>

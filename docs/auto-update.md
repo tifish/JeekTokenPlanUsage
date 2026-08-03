@@ -12,7 +12,7 @@
 
 - workflow 算出 `count`，**同时**写两个地方
   - `version.txt`（独立 release asset，约 4 字节）作远端真理
-  - `dotnet publish /p:Version=<count>`，让 SDK 把它补成 `AssemblyVersion=<count>.0.0.0`
+  - `dotnet build -c Release /p:Version=<count>`，让 SDK 把它补成 `AssemblyVersion=<count>.0.0.0`
 - 运行时反射读 `Assembly.Version.Major`（`AutoUpdater` 默认的 `GetLocalVersion`）
 
 **比较语义**严格 `remote > local`。force-push 让远端 count 倒退时也不会让客户端"降级回退"。
@@ -56,7 +56,7 @@ csproj 默认 `<Version>0.0.0.0</Version>`。本地构建 `Major=0`，低于 `Mi
 
 ### 替换自身必须经过外部脚本
 
-.NET 进程持有自己的 exe/dll 文件锁，运行期间无法替换。脚本归属 `bin/`（直接入库，不放源码目录）：`.gitignore` 用 `bin/*` + `!bin/AutoUpdate.ps1` 等单文件例外；`Publish.cmd` 清理 bin 时用 `$keep` 列表跳过这些已入库脚本。
+.NET 进程持有自己的 exe/dll 文件锁，运行期间无法替换。脚本归属 `bin/`（直接入库，不放源码目录）：`.gitignore` 用 `bin/*` + `!bin/AutoUpdate.ps1` 等单文件例外；`Build.cmd` 清理 bin 时用 `$keep` 列表跳过这些已入库脚本。
 
 ## CI 工作流
 

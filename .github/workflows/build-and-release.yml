@@ -42,8 +42,10 @@ jobs:
                   Set-Content -Path version.txt -Value $count -NoNewline -Encoding ascii
                   Write-Host "commit count = $count"
 
-            - name: Publish
-              run: dotnet publish ${{ env.PROJECT_NAME }}\${{ env.PROJECT_NAME }}.csproj -c Release -r win-x64 --no-self-contained -p:PublishReadyToRun=true -p:PublishTrimmed=false -p:PublishSingleFile=false /p:Version=${{ steps.ver.outputs.count }}
+            - name: Build Release
+              run: |
+                  dotnet build ${{ env.PROJECT_NAME }}\${{ env.PROJECT_NAME }}.csproj -c Release /p:Version=${{ steps.ver.outputs.count }}
+                  dotnet publish Tools/${{ env.PROJECT_NAME }}Mcp/${{ env.PROJECT_NAME }}Mcp.csproj -c Release
 
             - name: Zip files
               shell: pwsh

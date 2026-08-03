@@ -3,7 +3,7 @@ using JeekTools;
 namespace JeekTokenPlanUsage;
 
 /// Thin app-side wrapper over JeekTools.AutoUpdater. Version identity is the
-/// total git commit count on main — CI runs `dotnet publish /p:Version=<count>`
+/// total git commit count on main — CI runs `dotnet build -c Release /p:Version=<count>`
 /// which stamps AssemblyVersion.Major, and the `latest_release` release carries
 /// a version.txt with the same integer. The updater compares the two, downloads
 /// and stages the zip in-app (mirror racing, speed cutover, verification), then

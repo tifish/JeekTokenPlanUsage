@@ -44,8 +44,8 @@ cd JeekTokenPlanUsage
 .\Run.cmd
 ```
 
-Requires the .NET 10 SDK. `Build.cmd` builds, `Run.cmd` builds and launches,
-`Publish.cmd` produces the release layout in `bin\`.
+Requires the .NET 10 SDK. `Build.cmd` is the Release ship script into `bin\`;
+`Run.cmd` builds Debug and launches.
 
 ## License
 
