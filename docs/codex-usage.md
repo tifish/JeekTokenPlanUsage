@@ -70,6 +70,7 @@ codex exec .
 - 用 `--config -`，从 stdin 传配置文件（URL、headers、超时、写出指令）
 - Token 不出现在命令行参数里，避免在 `ps`/任务管理器中泄露
 - 配置末尾的 `write-out = "\nHTTPSTATUS:%{http_code}"` 让 HTTP 状态码追加在 stdout 末尾，供后续解析
+- 加 `ssl-revoke-best-effort`：Windows 自带 curl 用 Schannel，吊销列表（CRL/OCSP）服务器连不上时会直接把握手判死，报 `curl: (35) schannel: next InitializeSecurityContext failed: CRYPT_E_REVOCATION_OFFLINE`。该选项仍然检查吊销，但检查不到时不再让请求失败。老版本 curl（< 7.70）不认这个选项，检测到 unknown option 后会去掉它重试一次，本进程后续请求也不再带上
 
 [CodexUsageProvider.cs:50-64](../JeekTokenPlanUsage/CodexUsageProvider.cs#L50-L64) 是 config 生成；[CodexUsageProvider.cs:107-116](../JeekTokenPlanUsage/CodexUsageProvider.cs#L107-L116) 是状态码切分。
 

@@ -22,6 +22,9 @@ public sealed class CodexUsageProvider : IUsageProvider
 
     private static readonly string CurlPath = ResolveCurl();
 
+    /// Cleared for the rest of the process if the local curl rejects the option.
+    private static bool SslRevokeBestEffort = true;
+
     public string Name => "Codex";
 
     public async Task<UsageSnapshot> GetUsageAsync(CancellationToken ct)
@@ -60,6 +63,15 @@ public sealed class CodexUsageProvider : IUsageProvider
     {
         string config = BuildCurlConfig(auth.AccessToken, auth.AccountId);
         (string stdout, string stderr, int exitCode) = await RunCurlAsync(config, ct);
+        // Ancient curl builds (pre 7.70) do not know ssl-revoke-best-effort and
+        // abort on the unknown config option; drop it and retry once.
+        if (exitCode != 0 && SslRevokeBestEffort && IsUnknownOption(stderr, "ssl-revoke-best-effort"))
+        {
+            Log.Warn("Codex curl lacks ssl-revoke-best-effort; retrying without it");
+            SslRevokeBestEffort = false;
+            config = BuildCurlConfig(auth.AccessToken, auth.AccountId);
+            (stdout, stderr, exitCode) = await RunCurlAsync(config, ct);
+        }
         if (exitCode != 0)
         {
             Log.Warn($"Codex curl failed: exit {exitCode}; {Trim(stderr)}");
@@ -103,6 +115,12 @@ public sealed class CodexUsageProvider : IUsageProvider
             sb.AppendLine($"proxy = \"{proxy.AbsoluteUri}\"");
         else
             sb.AppendLine("noproxy = \"*\"");
+        // Schannel treats an unreachable CRL/OCSP responder as a fatal
+        // CRYPT_E_REVOCATION_OFFLINE error (curl exit 35). Keep checking
+        // revocation, but do not fail the request when the check cannot be
+        // completed, which is common behind restricted networks and proxies.
+        if (SslRevokeBestEffort)
+            sb.AppendLine("ssl-revoke-best-effort");
         sb.AppendLine("max-time = 20");
         sb.AppendLine("silent");
         sb.AppendLine("show-error");
@@ -435,6 +453,11 @@ public sealed class CodexUsageProvider : IUsageProvider
         string sys = Path.Combine(Environment.SystemDirectory, "curl.exe");
         return File.Exists(sys) ? sys : "curl.exe";
     }
+
+    private static bool IsUnknownOption(string stderr, string option) =>
+        stderr.Contains(option, StringComparison.OrdinalIgnoreCase)
+        && (stderr.Contains("unknown", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("not recognized", StringComparison.OrdinalIgnoreCase));
 
     private static string Trim(string s) => s.Length <= 80 ? s.Trim() : s[..80].Trim();
 
