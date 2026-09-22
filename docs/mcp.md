@@ -24,6 +24,8 @@
 
 每个工具在两处注册：handler 挂 `AddTool`，schema 放契约类并经 `ToolListProvider` 注入宿主。漏了契约那一处，客户端就看不见这个工具。
 
+调试接口另有 `probe_threshold_notifications`：用隔离的窗口状态顺序评估用量样本，复用托盘的阈值判断，不发送真实通知或修改运行状态。用于验证 80% / 95% 提醒、达到或超过 100% 后静默，以及重置周期后的重新提醒。
+
 碰 UI 状态的工具经 `UiInvoker`（WinForms `SynchronizationContext.Post` + 15 秒超时）走 UI 线程；产品接口的 `IMcpUsageSource` 实现自行在内部编排 UI 线程，无需 UiInvoker。
 
 ## stdio 适配器

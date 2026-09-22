@@ -2516,19 +2516,9 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     /// and Codex surface 5h (Primary); Cursor surfaces API (Secondary).
     private enum SingleModeWindow { Primary, Secondary }
 
-    /// Tracks the highest threshold (in NotificationThresholds) we've already
-    /// notified for the current window cycle. Resets when the window's ResetsAt
-    /// changes — i.e., the window rolled over to a new cycle.
-    private sealed class WindowThresholdState
-    {
-        public DateTimeOffset? LastSeenReset;
-        public int LastNotifiedThreshold;
-    }
-
     /// Holds two tray icons (primary + secondary window) for one provider.
     private sealed class ProviderIcons : IDisposable
     {
-        private static readonly int[] NotificationThresholds = { 80, 95 };
         private const int TooltipRemainingWidth = 7;
 
         private readonly string _displayName;
@@ -2742,21 +2732,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             UsageMetric metric,
             WindowThresholdState state)
         {
-            if (state.LastSeenReset != metric.ResetsAt)
-            {
-                state.LastSeenReset = metric.ResetsAt;
-                state.LastNotifiedThreshold = 0;
-            }
-
-            if (!_notifyEnabled())
-                return;
-
-            int crossed = 0;
-            foreach (int t in NotificationThresholds)
-                if (metric.Utilization >= t)
-                    crossed = t;
-
-            if (crossed <= state.LastNotifiedThreshold)
+            if (!state.ShouldNotify(metric, _notifyEnabled()))
                 return;
 
             target.ShowNotification(
@@ -2766,7 +2742,6 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                     _displayName,
                     spec.Label,
                     metric.Utilization.ToString("0.#")));
-            state.LastNotifiedThreshold = crossed;
         }
 
         // NIF_TIP allows up to 127 wchars (TrayIcon enforces the hard cap);

@@ -1,4 +1,5 @@
 using JeekTools;
+using System.Text.Json.Nodes;
 
 namespace JeekTokenPlanUsage;
 
@@ -54,6 +55,9 @@ internal static class DebugMcpServer
             ToolListProvider = DebugMcpContract.BuildToolList,
         });
 
+        host.AddTool("probe_threshold_notifications", args =>
+            Task.FromResult(ProbeThresholdNotifications(args)));
+
         host.Start();
         _host = host;
         if (ListeningEnabled)
@@ -65,6 +69,39 @@ internal static class DebugMcpServer
         _host?.Stop();
         _host = null;
         _uiContext = null;
+    }
+
+    // Runs the same decision code as the tray, but never touches live state,
+    // settings, credentials, or the shell notification API.
+    private static JsonObject ProbeThresholdNotifications(JsonObject args)
+    {
+        var samples = args["samples"] as JsonArray
+            ?? throw new ArgumentException("Missing samples array.");
+        var state = new WindowThresholdState();
+        var results = new JsonArray();
+        foreach (JsonNode? sample in samples)
+        {
+            double utilization = sample?["utilization"]?.GetValue<double>()
+                ?? throw new ArgumentException("Missing utilization.");
+            DateTimeOffset? resetsAt = sample?["resetsAt"]?.GetValue<DateTimeOffset>();
+            bool enabled = sample?["enabled"]?.GetValue<bool>() ?? true;
+            bool shouldNotify = state.ShouldNotify(new UsageMetric(utilization, resetsAt), enabled);
+            results.Add(new JsonObject
+            {
+                ["shouldNotify"] = shouldNotify,
+                ["lastNotifiedThreshold"] = state.LastNotifiedThreshold,
+            });
+        }
+        var data = new JsonObject { ["results"] = results };
+        return new JsonObject
+        {
+            ["content"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "text",
+                ["text"] = data.ToJsonString(),
+            }),
+            ["structuredContent"] = data,
+        };
     }
 
     /// Tool work that touches UI state runs on the UI thread, with a timeout so

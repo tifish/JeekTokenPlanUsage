@@ -117,6 +117,14 @@ the standard object-graph tools. Paths start at the root `Context`
 (the `TrayApplicationContext`); e.g. `Context._settings.PollMinutes`.
 `#Name` segments look up WinForms child controls by name.
 
+`probe_threshold_notifications` evaluates `samples` in order against a fresh,
+isolated window state using the same policy as the tray. Each sample has
+`utilization` (number), optional `resetsAt` (ISO 8601 string), and optional
+`enabled` (boolean, default true). Returns `results` with `shouldNotify` and
+`lastNotifiedThreshold`. It does not send notifications or change live state.
+Usage at or above 100% is silent and consumes the current cycle's thresholds;
+80% / 95% alerts are re-armed when the reset time changes.
+
 ## Response Shape
 
 Product tool results include `structuredContent`:

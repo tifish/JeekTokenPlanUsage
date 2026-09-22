@@ -10,6 +10,28 @@ internal static class DebugMcpContract
     public static JsonArray BuildToolList() =>
     [
         Tool(
+            "probe_threshold_notifications",
+            "Evaluate a sequence for one isolated usage window using the tray notification policy. No real notifications or live state changes.",
+            new JsonObject
+            {
+                ["samples"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["items"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["utilization"] = Prop("number", "Usage percentage."),
+                            ["resetsAt"] = Prop("string", "Optional ISO 8601 reset time; omit for unknown."),
+                            ["enabled"] = Prop("boolean", "Whether notifications are enabled, default true."),
+                        },
+                        ["required"] = new JsonArray("utilization"),
+                    },
+                },
+            },
+            required: ["samples"]),
+        Tool(
             "describe",
             "Describe this debug server: object-graph roots, pipe name, and version.",
             new JsonObject()),
