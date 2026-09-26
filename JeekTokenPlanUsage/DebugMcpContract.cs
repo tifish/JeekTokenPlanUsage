@@ -10,6 +10,10 @@ internal static class DebugMcpContract
     public static JsonArray BuildToolList() =>
     [
         Tool(
+            "probe_dependencies",
+            "Verify managed/native SQLite loading and a parameterized Unicode read/write in a private in-memory database; returns versions and roundTrip. No credentials or live databases are accessed.",
+            new JsonObject()),
+        Tool(
             "probe_threshold_notifications",
             "Evaluate a sequence for one isolated usage window using the tray notification policy. No real notifications or live state changes.",
             new JsonObject

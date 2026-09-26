@@ -112,6 +112,11 @@ Invokes a tray-menu-equivalent action on the UI thread.
 
 ## Debug Tools (Debug builds only)
 
+`probe_dependencies` takes no arguments and checks the deployed SQLite libraries
+with a parameterized Unicode read/write in a private in-memory database. It
+returns `sqliteVersion`, `managedSqliteVersion`, and `roundTrip`. It also emits
+a diagnostic log entry; no provider databases or credentials are accessed.
+
 `describe`, `get_value`, `set_value`, `invoke`, `list_members`, `read_logs` —
 the standard object-graph tools. Paths start at the root `Context`
 (the `TrayApplicationContext`); e.g. `Context._settings.PollMinutes`.

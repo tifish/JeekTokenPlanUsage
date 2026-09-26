@@ -1,4 +1,5 @@
 using JeekTools;
+using Microsoft.Data.Sqlite;
 using System.Text.Json.Nodes;
 
 namespace JeekTokenPlanUsage;
@@ -57,6 +58,7 @@ internal static class DebugMcpServer
 
         host.AddTool("probe_threshold_notifications", args =>
             Task.FromResult(ProbeThresholdNotifications(args)));
+        host.AddTool("probe_dependencies", _ => Task.FromResult(ProbeDependencies()));
 
         host.Start();
         _host = host;
@@ -69,6 +71,43 @@ internal static class DebugMcpServer
         _host?.Stop();
         _host = null;
         _uiContext = null;
+    }
+
+    // Exercise the deployed managed/native SQLite pair with synthetic data.
+    // Never open a provider's database or read credentials for this probe.
+    private static JsonObject ProbeDependencies()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:;Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT NOT NULL)";
+        command.ExecuteNonQuery();
+        command.CommandText = "INSERT INTO ItemTable (key, value) VALUES ($key, $value)";
+        command.Parameters.AddWithValue("$key", "debug-probe");
+        command.Parameters.AddWithValue("$value", "SQLite 测试");
+        command.ExecuteNonQuery();
+        command.CommandText = "SELECT value FROM ItemTable WHERE key = $key";
+        bool roundTrip = Equals(command.ExecuteScalar(), "SQLite 测试");
+        command.Parameters.Clear();
+        command.CommandText = "SELECT sqlite_version()";
+        string? sqliteVersion = command.ExecuteScalar()?.ToString();
+        Log.Info($"Dependency probe: SQLite {sqliteVersion}, roundTrip={roundTrip}");
+        var data = new JsonObject
+        {
+            ["sqliteVersion"] = sqliteVersion,
+            ["managedSqliteVersion"] = typeof(SqliteConnection).Assembly.GetName().Version?.ToString(),
+            ["roundTrip"] = roundTrip,
+        };
+        return new JsonObject
+        {
+            ["content"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "text",
+                ["text"] = data.ToJsonString(),
+            }),
+            ["structuredContent"] = data,
+            ["isError"] = !roundTrip,
+        };
     }
 
     // Runs the same decision code as the tray, but never touches live state,
