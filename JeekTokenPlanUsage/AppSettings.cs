@@ -50,10 +50,6 @@ internal sealed class AppSettings
     /// forces portable mode regardless of the saved mode.
     private static readonly SettingsStorage Storage = new(AppName);
 
-    /// Tick of the last save this process performed. The settings watcher uses
-    /// it to ignore file events caused by our own writes.
-    public static long LastWriteTick { get; private set; }
-
     private string _roamingConfigDirectory = "";
     private string _roamingSettingsPath = "";
     private SettingsStorageMode _savedStorageMode = SettingsStorageMode.AppData;
@@ -301,10 +297,23 @@ internal sealed class AppSettings
         return settings;
     }
 
-    public void ReloadFromDisk()
+    public bool ReloadRoamingFromDisk()
     {
-        AppSettings loaded = Load();
-        CopyFrom(loaded);
+        // A roaming-file event must not reload or overwrite unrelated machine state.
+        if (!JsonSettingsFile.TryLoad(_roamingSettingsPath, out RoamingSettingsFile roaming)
+            && File.Exists(_roamingSettingsPath))
+        {
+            Log.Warn("Settings reload skipped: roaming settings are unreadable or invalid.");
+            return false;
+        }
+        bool changed = JsonSettingsFile.Serialize(roaming) != JsonSettingsFile.Serialize(RoamingSettingsFile.From(this));
+        _roamingBaseline = JsonSettingsFile.Clone(roaming);
+        if (changed)
+        {
+            ApplyRoamingSettings(roaming);
+            NormalizeLegacyFields();
+        }
+        return changed;
     }
 
     /// Switches the roaming storage mode. When moveFiles is true the whole
@@ -366,7 +375,6 @@ internal sealed class AppSettings
                 static _ => { }, forceAllLocal, out RoamingSettingsFile mergedRoaming))
             _roamingBaseline = mergedRoaming;
 
-        LastWriteTick = Environment.TickCount64;
     }
 
     private static string? PeekLanguageFromPath(string path)
@@ -469,36 +477,6 @@ internal sealed class AppSettings
             changed = true;
         }
         return changed;
-    }
-
-    private void CopyFrom(AppSettings other)
-    {
-        ShowClaude = other.ShowClaude;
-        ShowCodex = other.ShowCodex;
-        ShowCursor = other.ShowCursor;
-        ShowGrok = other.ShowGrok;
-        Paused = other.Paused;
-        IconMode = other.IconMode;
-        PollMinutes = other.PollMinutes;
-        Language = other.Language;
-        Theme = other.Theme;
-        EnableThresholdNotifications = other.EnableThresholdNotifications;
-        ShowTaskbarWidget = other.ShowTaskbarWidget;
-        TaskbarWidgetOffset = other.TaskbarWidgetOffset;
-        ClaudePollMinutes = other.ClaudePollMinutes;
-        AutoUpdate = other.AutoUpdate;
-        DisableMirrorDownload = other.DisableMirrorDownload;
-        ProxyMode = other.ProxyMode;
-        ProxyProtocol = other.ProxyProtocol;
-        ProxyHost = other.ProxyHost;
-        ProxyPort = other.ProxyPort;
-        StorageMode = other.StorageMode;
-        _savedStorageMode = other._savedStorageMode;
-        CustomStorageRoot = other.CustomStorageRoot;
-        _roamingConfigDirectory = other._roamingConfigDirectory;
-        _roamingSettingsPath = other._roamingSettingsPath;
-        _machineBaseline = other._machineBaseline;
-        _roamingBaseline = other._roamingBaseline;
     }
 
     private static bool SamePath(string left, string right)

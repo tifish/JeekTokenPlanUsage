@@ -152,6 +152,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private readonly WinTimer _updateTimer;
     private readonly WinTimer _settingsReloadTimer;
     private FileSystemWatcher? _settingsWatcher;
+    private int _settingsReloadCount;
     private bool _updateInProgress;
     private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(1);
     private static readonly TimeSpan UpdateInitialDelay = TimeSpan.FromSeconds(5);
@@ -485,6 +486,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 
     private void StartSettingsWatcher()
     {
+        _settingsReloadTimer.Stop();
         _settingsWatcher?.Dispose();
         _settingsWatcher = null;
 
@@ -517,15 +519,17 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         if (_disposed)
             return;
 
-        // Ignore the file events our own saves generate; only external edits
-        // (another instance, a sync tool, a text editor) should trigger a reload.
-        long lastWrite = AppSettings.LastWriteTick;
-        if (lastWrite > 0 && Environment.TickCount64 - lastWrite < 1000)
-            return;
-
+        // Compare paths on the UI thread, including the old name of an atomic rename.
+        // Do not suppress events based on time: another instance may save immediately
+        // after us. Content comparison at reload avoids applying our own writes twice.
         _uiContext?.Post(_ =>
         {
-            if (_disposed)
+            if (_disposed || !ReferenceEquals(sender, _settingsWatcher))
+                return;
+            string expected = _settings.RoamingSettingsPath;
+            if (!string.Equals(e.FullPath, expected, StringComparison.OrdinalIgnoreCase)
+                && !(e is RenamedEventArgs renamed
+                    && string.Equals(renamed.OldFullPath, expected, StringComparison.OrdinalIgnoreCase)))
                 return;
             _settingsReloadTimer.Stop();
             _settingsReloadTimer.Start();
@@ -538,17 +542,12 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             return;
 
         string previousLanguage = _settings.Language;
-        string previousConfigDirectory = _settings.RoamingConfigDirectory;
         try
         {
-            _settings.ReloadFromDisk();
-            AppProxy.Configure(_settings);
+            if (!_settings.ReloadRoamingFromDisk())
+                return;
+            _settingsReloadCount++;
             ApplySettingsFromDisk(previousLanguage);
-            if (!string.Equals(
-                previousConfigDirectory,
-                _settings.RoamingConfigDirectory,
-                StringComparison.OrdinalIgnoreCase))
-                StartSettingsWatcher();
             Log.Info($"Settings reloaded from {_settings.RoamingSettingsPath}");
         }
         catch (Exception ex)
