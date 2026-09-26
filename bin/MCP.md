@@ -121,9 +121,13 @@ the standard object-graph tools. Paths start at the root `Context`
 isolated window state using the same policy as the tray. Each sample has
 `utilization` (number), optional `resetsAt` (ISO 8601 string), and optional
 `enabled` (boolean, default true). Returns `results` with `shouldNotify` and
-`lastNotifiedThreshold`. It does not send notifications or change live state.
+`lastNotifiedThreshold`, and the stable `cycleReset` anchor. It does not send
+notifications or change live state.
 Usage at or above 100% is silent and consumes the current cycle's thresholds;
-80% / 95% alerts are re-armed when the reset time changes.
+80% / 95% alerts are re-armed only when the reset time advances by more than
+one minute from the cycle anchor. Jitter, missing resets, and older timestamps
+do not re-arm alerts. Run `python Tools/test_threshold_notifications.py`
+against the running Debug build to verify this policy.
 
 ## Response Shape
 

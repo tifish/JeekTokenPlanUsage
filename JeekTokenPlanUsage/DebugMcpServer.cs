@@ -90,6 +90,7 @@ internal static class DebugMcpServer
             {
                 ["shouldNotify"] = shouldNotify,
                 ["lastNotifiedThreshold"] = state.LastNotifiedThreshold,
+                ["cycleReset"] = state.LastSeenReset?.ToString("O"),
             });
         }
         var data = new JsonObject { ["results"] = results };

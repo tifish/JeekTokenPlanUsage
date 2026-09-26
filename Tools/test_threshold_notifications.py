@@ -56,6 +56,25 @@ cases = [
      [True, False, False]),
     ("no repeated alerts around thresholds", [sample(u) for u in [80, 79, 80, 95, 94, 95]],
      [True, False, False, True, False, False]),
+    ("reported Claude jitter", [sample(80, "2026-09-26T06:09:59.528352Z"),
+     sample(85, "2026-09-26T06:10:00Z"), sample(88, "2026-09-26T06:09:59.800Z"),
+     sample(90, "2026-09-26T06:10:00.162269Z"),
+     sample(95, "2026-09-26T06:10:00Z"), sample(99, "2026-09-26T06:10:00Z")],
+     [True, False, False, False, True, False]),
+    ("missing reset preserves history", [sample(80), sample(85, None), sample(88), sample(95, None)],
+     [True, False, False, True]),
+    ("first known reset preserves history", [sample(80, None), sample(85), sample(95)],
+     [True, False, True]),
+    ("stale reset cannot rearm", [sample(95, CYCLE_B), sample(88), sample(96, CYCLE_B)],
+     [True, False, False]),
+    ("one-minute boundary", [sample(80), sample(85, "2026-09-22T12:01:00Z"),
+     sample(88, "2026-09-22T12:01:00.001Z")], [True, False, True]),
+    ("exhausted then jitter", [sample(100), sample(99, "2026-09-22T12:00:00.500Z"),
+     sample(95, None), sample(99)], [False] * 4),
+    ("repeated jitter keeps anchor", [sample(80)] + [
+        sample(88, reset) for _ in range(20) for reset in
+        ["2026-09-22T12:00:00.600Z", "2026-09-22T11:59:59.800Z"]],
+     [True] + [False] * 40),
 ]
 
 requests = [{"jsonrpc": "2.0", "id": 0, "method": "tools/list"}]
@@ -72,6 +91,8 @@ assert any(tool["name"] == "probe_threshold_notifications" for tool in results[0
 for (name, _, expected), result in zip(cases, results[1:]):
     actual = [step["shouldNotify"] for step in result["structuredContent"]["results"]]
     assert actual == expected, f"{name}: expected {expected}, got {actual}"
+    if name == "repeated jitter keeps anchor":
+        assert len({step["cycleReset"] for step in result["structuredContent"]["results"]}) == 1
     print(f"PASS: {name}")
 
 product = rpc("product", [requests[0]])[0]

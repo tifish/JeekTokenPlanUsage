@@ -2723,9 +2723,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             current = rendered;
         }
 
-        // Each (window, threshold) fires at most once per window cycle. We treat
-        // a change in ResetsAt as a window rollover and re-arm; that way a user
-        // who hovers around 80% doesn't get spammed.
+        // Each (window, threshold) fires at most once per cycle. Small reset
+        // timestamp changes must not re-arm a notification.
         private void CheckThresholds(
             TrayIcon target,
             WindowSpec spec,
@@ -2742,6 +2741,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                     _displayName,
                     spec.Label,
                     metric.Utilization.ToString("0.#")));
+            Log.Info($"Usage notification: {_displayName} {spec.Label}, threshold={state.LastNotifiedThreshold}, utilization={metric.Utilization:0.#}, resetsAt={metric.ResetsAt:O}");
         }
 
         // NIF_TIP allows up to 127 wchars (TrayIcon enforces the hard cap);

@@ -4,15 +4,23 @@ namespace JeekTokenPlanUsage;
 internal sealed class WindowThresholdState
 {
     private static readonly int[] NotificationThresholds = { 80, 95 };
+    private static readonly TimeSpan ResetTolerance = TimeSpan.FromMinutes(1);
     public DateTimeOffset? LastSeenReset;
     public int LastNotifiedThreshold;
 
     public bool ShouldNotify(UsageMetric metric, bool enabled)
     {
-        if (LastSeenReset != metric.ResetsAt)
+        // Keep a stable anchor: fractional seconds, fallback timestamps, and a
+        // temporarily missing reset do not mean that the quota has renewed.
+        if (metric.ResetsAt is { } reset)
         {
-            LastSeenReset = metric.ResetsAt;
-            LastNotifiedThreshold = 0;
+            if (LastSeenReset is not { } previous)
+                LastSeenReset = reset;
+            else if (reset - previous > ResetTolerance)
+            {
+                LastSeenReset = reset;
+                LastNotifiedThreshold = 0;
+            }
         }
 
         // Exhausted windows need no further warning, including on startup or

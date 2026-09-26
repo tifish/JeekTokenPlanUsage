@@ -14,9 +14,21 @@
 
 ## 关键设计
 
+### 用量阈值通知
+
+每个 provider 的各用量窗口分别记录通知状态，同一周期内 80% 和 95% 各提醒一次；达到 100% 后不再提醒。
+重置时间可能带有小数秒或在备用接口间存在精度差异，因此以首次已知的重置时间为基准，
+只有后续重置时间向后推进超过 1 分钟，才重新启用通知。1 分钟内的抖动、时间临时缺失、
+较早的旧时间戳以及用量回落都不会清空记录。状态目前只保存在内存，重启程序会重新提醒。
+
+Debug MCP 的 `probe_threshold_notifications` 使用相同逻辑回放数据，不发送实际通知；
+启动当前工作区的 Debug 程序后，运行 `python Tools/test_threshold_notifications.py` 验证。
+
 ### 每个图标一个固定 GUID
 
 [TrayApplicationContext.cs:29-35](../JeekTokenPlanUsage/TrayApplicationContext.cs#L29-L35) 集中声明了 7 个硬编码 GUID。一旦发布就**不能再改** —— 改了之后老用户托盘里的图标位置和 "始终显示" 设置会全部丢失，因为 shell 把这些状态绑在 GUID 上。
+
+Debug 构建使用可执行目录派生的独立 GUID 和单实例互斥锁，以便与已安装版本及其他工作区并行运行；Release 的 GUID 和互斥锁保持不变。
 
 ### `TaskbarCreated` 重注册
 

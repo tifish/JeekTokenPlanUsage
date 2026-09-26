@@ -23,7 +23,11 @@ internal static class DebugMcpContract
                         ["properties"] = new JsonObject
                         {
                             ["utilization"] = Prop("number", "Usage percentage."),
-                            ["resetsAt"] = Prop("string", "Optional ISO 8601 reset time; omit for unknown."),
+                            ["resetsAt"] = new JsonObject
+                            {
+                                ["type"] = new JsonArray("string", "null"),
+                                ["description"] = "ISO 8601 reset time; omit or null for unknown.",
+                            },
                             ["enabled"] = Prop("boolean", "Whether notifications are enabled, default true."),
                         },
                         ["required"] = new JsonArray("utilization"),

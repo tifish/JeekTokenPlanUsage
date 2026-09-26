@@ -5,14 +5,12 @@ namespace JeekTokenPlanUsage;
 
 internal static class Program
 {
-    private const string MutexName = "Global\\JeekTokenPlanUsage.SingleInstance";
-
     public static CultureInfo SystemUiCulture { get; private set; } = CultureInfo.CurrentUICulture;
 
     [STAThread]
     private static void Main()
     {
-        using var mutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
+        using var mutex = new Mutex(initiallyOwned: true, AppInstance.MutexName, out var createdNew);
         if (!createdNew)
             return;
 

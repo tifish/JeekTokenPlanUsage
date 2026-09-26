@@ -98,7 +98,7 @@ internal sealed class TrayIcon : IDisposable
 
     public TrayIcon(Guid guid, ContextMenuStrip? menu)
     {
-        _guid = guid;
+        _guid = AppInstance.TrayGuid(guid);
         _menu = menu;
         _window = new MessageWindow(this);
     }
