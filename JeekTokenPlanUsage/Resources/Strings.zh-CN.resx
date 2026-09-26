@@ -317,4 +317,8 @@
   <data name="Jwt_ParseFailedFormat" xml:space="preserve">
     <value>解析 JWT 失败: {0}</value>
   </data>
+  <data name="Menu_Theme" xml:space="preserve"><value>主题</value></data>
+  <data name="Theme_System" xml:space="preserve"><value>跟随系统</value></data>
+  <data name="Theme_Light" xml:space="preserve"><value>亮色</value></data>
+  <data name="Theme_Dark" xml:space="preserve"><value>暗色</value></data>
 </root>

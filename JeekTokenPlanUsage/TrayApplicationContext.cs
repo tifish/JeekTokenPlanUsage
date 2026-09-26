@@ -129,6 +129,9 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private ToolStripMenuItem _showGrokItem = null!;
     private ToolStripMenuItem _iconDisplayParent = null!;
     private ToolStripMenuItem _intervalParent = null!;
+    private ToolStripMenuItem _themeItem = null!;
+    internal bool IsDarkTheme => Application.IsDarkModeEnabled;
+
     private ToolStripMenuItem _languageItem = null!;
     private ToolStripMenuItem _languageAutoItem = null!;
     private ToolStripMenuItem _notifyItem = null!;
@@ -581,6 +584,8 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _taskbarWidget.Visible = _settings.ShowTaskbarWidget;
 
         UpdateMenuChecks();
+        OnSystemThemeChanged();
+        UpdateThemeMenu();
         if (!string.Equals(previousLanguage, _settings.Language, StringComparison.Ordinal))
         {
             ApplyUiCulture(_settings.Language);
@@ -635,7 +640,13 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         // Re-applying System color mode re-maps SystemColors (Window/ControlText/…)
         // to the new theme — they're otherwise frozen at their startup values — and
         // lets WinForms re-theme its controls/menus. Then repaint our surfaces.
-        try { Application.SetColorMode(SystemColorMode.System); } catch { }
+        SystemTheme.Apply(_settings.Theme);
+        foreach (Form form in Application.OpenForms)
+        {
+            form.BackColor = SystemColors.Window;
+            form.ForeColor = SystemColors.ControlText;
+            form.Invalidate(true);
+        }
         _detailsForm.NotifyThemeChanged();
         _taskbarWidget.NotifyThemeChanged();
     }
@@ -848,6 +859,34 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         }
     }
 
+    private static string ThemeLabel(string theme) => theme switch
+    {
+        "light" => Strings.Theme_Light,
+        "dark" => Strings.Theme_Dark,
+        _ => Strings.Theme_System,
+    };
+
+    private void SetTheme(string theme)
+    {
+        if (theme is not ("system" or "light" or "dark"))
+            throw new ArgumentException("Theme must be system, light or dark.");
+        _settings.Theme = theme;
+        _settings.Save();
+        OnSystemThemeChanged();
+        UpdateThemeMenu();
+    }
+
+    private void UpdateThemeMenu()
+    {
+        _themeItem.Text = Strings.Menu_Theme;
+        foreach (ToolStripMenuItem item in _themeItem.DropDownItems)
+        {
+            string theme = (string)item.Tag!;
+            item.Text = ThemeLabel(theme);
+            item.Checked = theme == _settings.Theme;
+        }
+    }
+
     private void WireLanguageMenu()
     {
         foreach (ToolStripItem raw in _languageItem.DropDownItems)
@@ -1045,6 +1084,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _iconDisplayParent.Text = Strings.Menu_IconDisplay;
         _intervalParent.Text = Strings.Menu_RefreshInterval;
         _languageItem.Text = Strings.Menu_Language;
+        UpdateThemeMenu();
         _languageAutoItem.Text = Strings.Menu_LanguageAuto;
         _notifyItem.Text = Strings.Menu_EnableNotifications;
         _widgetItem.Text = Strings.Menu_ShowTaskbarWidget;
@@ -1123,6 +1163,13 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         // UI culture — that's the standard convention so users can find their
         // language even when the app is in a script they can't read. The
         // "follow system" item is the only one that gets localized.
+        _themeItem = new ToolStripMenuItem(Strings.Menu_Theme);
+        foreach (string theme in new[] { "system", "light", "dark" })
+        {
+            var item = new ToolStripMenuItem(ThemeLabel(theme)) { Tag = theme, Checked = theme == _settings.Theme };
+            item.Click += (_, _) => SetTheme(theme);
+            _themeItem.DropDownItems.Add(item);
+        }
         _languageItem = new ToolStripMenuItem(Strings.Menu_Language);
         _languageAutoItem = new ToolStripMenuItem(Strings.Menu_LanguageAuto) { Tag = "" };
         _languageItem.DropDownItems.Add(_languageAutoItem);
@@ -1181,6 +1228,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         menu.Items.Add(_showGrokItem);
         menu.Items.Add(_iconDisplayParent);
         menu.Items.Add(_intervalParent);
+        menu.Items.Add(_themeItem);
         menu.Items.Add(_languageItem);
         menu.Items.Add(_storageParent);
         menu.Items.Add(_proxyParent);
@@ -1352,6 +1400,11 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 message = $"Poll interval set to {_settings.PollMinutes} minutes.";
                 break;
 
+            case "set_theme":
+                SetTheme(RequireString(request.Mode, "mode"));
+                message = $"Theme set to {_settings.Theme}.";
+                break;
+
             case "set_language":
                 SetLanguage(request.Language ?? "");
                 message = string.IsNullOrEmpty(_settings.Language)
@@ -1456,6 +1509,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             FormatIconDisplayMode(_settings.IconMode),
             _settings.PollMinutes,
             _settings.Language,
+            _settings.Theme,
             _settings.EnableThresholdNotifications,
             _settings.ShowTaskbarWidget,
             _settings.TaskbarWidgetOffset,
@@ -1474,6 +1528,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             new[] { "none", "single", "double" },
             AllowedPollMinutes,
             new[] { "", "zh-CN", "en" },
+            new[] { "system", "light", "dark" },
             new[] { "direct", "system", "custom" },
             new[] { "socks5", "http" },
             new[] { "appData", "portable", "custom" },
@@ -1485,6 +1540,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 "set_icon_display",
                 "set_poll_interval",
                 "set_language",
+                "set_theme",
                 "set_threshold_notifications",
                 "set_taskbar_widget",
                 "set_startup",

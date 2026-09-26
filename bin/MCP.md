@@ -96,6 +96,7 @@ Invokes a tray-menu-equivalent action on the UI thread.
 | `set_provider_enabled` | `provider`, `enabled` |
 | `set_icon_display` | `mode`: `none`, `single`, `double` |
 | `set_poll_interval` | `minutes`: `1`, `2`, `3`, `5`, `10` |
+| `set_theme` | `mode`: `system`, `light`, `dark` |
 | `set_language` | `language`: `""`, `zh-CN`, `en` |
 | `set_threshold_notifications` | `enabled` |
 | `set_taskbar_widget` | optional `visible`, optional `offset` |

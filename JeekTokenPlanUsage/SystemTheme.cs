@@ -12,6 +12,13 @@ namespace JeekTokenPlanUsage;
 /// one that actually governs its background.
 internal static class SystemTheme
 {
+    public static void Apply(string theme) => Application.SetColorMode(theme switch
+    {
+        "dark" => SystemColorMode.Dark,
+        "light" => SystemColorMode.Classic,
+        _ => SystemColorMode.System,
+    });
+
     private const string PersonalizeKey =
         @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 

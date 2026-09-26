@@ -83,6 +83,7 @@ internal sealed class AppSettings
     /// English (the neutral resource) used for any culture without a satellite.
     /// Values match a resource culture name, e.g. "en", "zh-CN".
     public string Language { get; set; } = "";
+    public string Theme { get; set; } = "system";
 
     /// Show a Windows toast when a usage window first crosses 80% or 95%.
     /// Each (window, threshold) only fires once per window cycle.
@@ -225,6 +226,19 @@ internal sealed class AppSettings
         return PeekLanguageFromPath(settingsPath)
             ?? PeekLanguageFromPath(LegacySettingsPath)
             ?? "";
+    }
+
+    internal static string NormalizeTheme(string? theme) => theme?.ToLowerInvariant() switch
+    {
+        "light" => "light", "dark" => "dark", _ => "system",
+    };
+
+    public static string PeekTheme()
+    {
+        MachineSettingsFile machine = LoadMachineSettings();
+        string path = Storage.ResolveSettingsPath(ResolveEffectiveLocation(machine), machine.CustomStorageRoot);
+        return JsonSettingsFile.TryLoad(path, out RoamingSettingsFile roaming)
+            ? NormalizeTheme(roaming.Theme) : "system";
     }
 
     public static AppSettings Load()
@@ -397,6 +411,7 @@ internal sealed class AppSettings
         IconMode = roaming.IconMode;
         PollMinutes = roaming.PollMinutes;
         Language = roaming.Language;
+        Theme = NormalizeTheme(roaming.Theme);
         EnableThresholdNotifications = roaming.EnableThresholdNotifications;
         ClaudePollMinutes = roaming.ClaudePollMinutes;
         AutoUpdate = roaming.AutoUpdate;
@@ -466,6 +481,7 @@ internal sealed class AppSettings
         IconMode = other.IconMode;
         PollMinutes = other.PollMinutes;
         Language = other.Language;
+        Theme = other.Theme;
         EnableThresholdNotifications = other.EnableThresholdNotifications;
         ShowTaskbarWidget = other.ShowTaskbarWidget;
         TaskbarWidgetOffset = other.TaskbarWidgetOffset;
@@ -519,6 +535,7 @@ internal sealed class AppSettings
         public IconDisplayMode IconMode { get; set; } = IconDisplayMode.Double;
         public int PollMinutes { get; set; } = 5;
         public string Language { get; set; } = "";
+        public string Theme { get; set; } = "system";
         public bool EnableThresholdNotifications { get; set; } = true;
         public int ClaudePollMinutes { get; set; }
         public bool AutoUpdate { get; set; } = true;
@@ -533,6 +550,7 @@ internal sealed class AppSettings
             IconMode = settings.IconMode,
             PollMinutes = settings.PollMinutes,
             Language = settings.Language,
+            Theme = settings.Theme,
             EnableThresholdNotifications = settings.EnableThresholdNotifications,
             ClaudePollMinutes = 0,
             AutoUpdate = settings.AutoUpdate,

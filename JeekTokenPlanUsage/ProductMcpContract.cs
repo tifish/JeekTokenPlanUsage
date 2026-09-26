@@ -44,7 +44,7 @@ internal static class ProductMcpContract
                     ["type"] = "string",
                     ["enum"] = new JsonArray(
                         "refresh", "set_paused", "set_provider_enabled", "set_icon_display",
-                        "set_poll_interval", "set_language", "set_threshold_notifications",
+                        "set_poll_interval", "set_language", "set_theme", "set_threshold_notifications",
                         "set_taskbar_widget", "set_startup", "set_auto_update", "set_proxy",
                         "set_storage", "show_details", "hide_details", "toggle_details",
                         "open_log", "check_update", "show_about", "exit_app"),
@@ -55,7 +55,7 @@ internal static class ProductMcpContract
                     "boolean",
                     "Required by set_provider_enabled, set_threshold_notifications, set_startup, and set_auto_update."),
                 ["visible"] = Prop("boolean", "Optional for set_taskbar_widget."),
-                ["mode"] = Prop("string", "Icon mode, proxy mode, or storage mode depending on the action."),
+                ["mode"] = Prop("string", "Theme (system/light/dark), icon mode, proxy mode, or storage mode depending on the action."),
                 ["minutes"] = Prop("integer", "Required by set_poll_interval."),
                 ["language"] = Prop(
                     "string", "Required by set_language. Use empty string to follow system UI language."),

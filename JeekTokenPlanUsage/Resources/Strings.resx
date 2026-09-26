@@ -317,4 +317,8 @@ Choose No to only change the setting and leave files in their current location.<
   <data name="Jwt_ParseFailedFormat" xml:space="preserve">
     <value>Failed to parse JWT: {0}</value>
   </data>
+  <data name="Menu_Theme" xml:space="preserve"><value>Theme</value></data>
+  <data name="Theme_System" xml:space="preserve"><value>Follow system</value></data>
+  <data name="Theme_Light" xml:space="preserve"><value>Light</value></data>
+  <data name="Theme_Dark" xml:space="preserve"><value>Dark</value></data>
 </root>
