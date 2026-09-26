@@ -3,7 +3,8 @@
 The app exposes MCP over a Windows named pipe, not a TCP port: nothing to
 allocate, no firewall prompts, and access control comes from the pipe ACL
 (current user + SYSTEM only). `JeekTokenPlanUsageMcp.exe` in this directory is
-a stdio adapter an agent launches like any stdio MCP server; it forwards
+the build copy. On startup a background thread installs it to
+`%LocalAppData%\JeekTokenPlanUsage\Mcp`. Agents launch that stable copy; it forwards
 JSON-RPC to the running app's pipe.
 
 ## Client Configuration
@@ -13,7 +14,7 @@ JSON-RPC to the running app's pipe.
     "mcpServers": {
         "jeek-token-plan-usage": {
             "type": "stdio",
-            "command": "C:\\path\\to\\bin\\JeekTokenPlanUsageMcp.exe"
+            "command": "C:\\Users\\<user>\\AppData\\Local\\JeekTokenPlanUsage\\Mcp\\JeekTokenPlanUsageMcp.exe"
         }
     }
 }
@@ -28,7 +29,7 @@ executables against the parent's directory, not the configured cwd):
         "jtpu-debug": {
             "type": "stdio",
             "command": "cmd",
-            "args": ["/c", ".\\bin\\JeekTokenPlanUsageMcp.exe", "--surface", "debug"],
+            "args": ["/c", ".\\JeekTokenPlanUsageDebugMcp.cmd"],
             "cwd": "."
         }
     }
@@ -42,11 +43,12 @@ Adapter options:
 | `--surface product\|debug` | Which endpoint to reach. Default `product`. |
 | `--pipe <name>` | Explicit pipe name override. |
 | `--instance <id>` | Explicit instance id override. |
-| `--app <path>` | Path to `JeekTokenPlanUsage.exe` for auto-launch. |
+| `--app <path>` | Path to `JeekTokenPlanUsage.exe` for instance routing and auto-launch. |
 | `--launch` / `--no-launch` | Auto-start the app on a tool call. Default: on for `product`, off for `debug`. |
 
-The adapter derives the pipe name from its own folder, so a copy only ever
-reaches the app in the same folder. It answers `initialize`/`ping` locally
+The Debug launcher passes this worktree executable via `--app`; its directory
+determines the instance pipe. Debug never falls back to another instance.
+Product auto-launch defaults to `%LocalAppData%\Programs\JeekTokenPlanUsage`. It answers `initialize`/`ping` locally
 while the app is closed (the session stays usable) and reconnects on its own
 after an app restart.
 

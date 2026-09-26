@@ -15,6 +15,7 @@ internal static class Program
             return;
 
         ConfigureLogging();
+        McpAdapterInstaller.Start();
         ConfigureProxy();
 
         SystemUiCulture = CultureInfo.CurrentUICulture;

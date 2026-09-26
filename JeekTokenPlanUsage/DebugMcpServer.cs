@@ -59,6 +59,7 @@ internal static class DebugMcpServer
         host.AddTool("probe_threshold_notifications", args =>
             Task.FromResult(ProbeThresholdNotifications(args)));
         host.AddTool("probe_dependencies", _ => Task.FromResult(ProbeDependencies()));
+        host.AddTool("probe_adapter_installation", _ => Task.FromResult(ProbeAdapterInstallation()));
 
         host.Start();
         _host = host;
@@ -71,6 +72,40 @@ internal static class DebugMcpServer
         _host?.Stop();
         _host = null;
         _uiContext = null;
+    }
+
+    private static JsonObject ProbeAdapterInstallation()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JeekTokenPlanUsageProbe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string source = Path.Combine(root, "Source");
+            string target = Path.Combine(root, "Target");
+            Directory.CreateDirectory(source);
+            string src = Path.Combine(source, McpAdapterInstaller.AdapterName);
+            string dst = Path.Combine(target, McpAdapterInstaller.AdapterName);
+            File.WriteAllText(src, "first");
+            McpAdapterInstaller.Install(source, target);
+            bool first = File.ReadAllText(dst) == "first";
+            // Simulate an agent holding the old image open with rename sharing.
+            using (var held = new FileStream(dst, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+            {
+                File.WriteAllText(src, "replacement");
+                McpAdapterInstaller.Install(source, target);
+            }
+            bool replaced = File.ReadAllText(dst) == "replacement";
+            File.WriteAllText(dst + ".old.stale1", "old");
+            File.WriteAllText(dst + ".old.stale2", "old");
+            McpAdapterInstaller.Install(source, target);
+            bool cleaned = !Directory.EnumerateFiles(target, "*.old.*").Any();
+            bool timestamp = File.GetLastWriteTimeUtc(src) == File.GetLastWriteTimeUtc(dst);
+            var data = new JsonObject { ["firstInstall"] = first, ["lockedReplacement"] = replaced,
+                ["cleanupWithoutUpdate"] = cleaned, ["timestampPreserved"] = timestamp };
+            return new JsonObject { ["structuredContent"] = data,
+                ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = data.ToJsonString() }),
+                ["isError"] = !(first && replaced && cleaned && timestamp) };
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     // Exercise the deployed managed/native SQLite pair with synthetic data.

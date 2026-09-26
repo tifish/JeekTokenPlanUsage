@@ -33,7 +33,8 @@
 [Tools/JeekTokenPlanUsageMcp](../Tools/JeekTokenPlanUsageMcp) 随主程序发布到 `bin`：
 
 - 命名用完整程序名 + Mcp（`JeekTokenPlanUsageMcp.exe`），进程列表里一眼可辨。
-- 与主程序同目录，从**自身目录**推导实例 id，某个副本只可能连到同目录的程序。
+- `bin` 只存构建副本；启动时由独立后台线程按 size/date 更新固定路径 `%LocalAppData%\JeekTokenPlanUsage\Mcp`，旧文件改为唯一备份名并在后续检查清理。
+- Agent 使用固定路径副本；Debug 使用根目录 `JeekTokenPlanUsageDebugMcp.cmd`，通过 `--app` 推导工作区管道，不回退到其他 Debug 实例。
 - **单文件发布**（`dotnet publish`，不要 `dotnet build` 进 bin）：主程序用 NetBeauty，会给 bin 里每个 `*.runtimeconfig.json` 打 libloader 启动钩子，被打过的适配器在 agent 会话期间占着 `libloader.dll`，主程序下次构建就会失败；单文件把 runtimeconfig 收进 exe，NetBeauty 扫不到。
 - 程序未运行时本地应答 initialize / ping（握手不失败），tools/call 返回可读软报错；产品接口按需拉起主程序（`--launch` 默认仅 product 开）。
 - 每次调用前检查连接，断管重连一次——程序重启后 agent 会话不用重开。

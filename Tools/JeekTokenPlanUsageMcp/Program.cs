@@ -6,15 +6,8 @@ using JeekTokenPlanUsage;
 
 // JeekTokenPlanUsage MCP stdio adapter.
 //
-// An agent launches this executable as an ordinary stdio MCP server; it forwards
-// JSON-RPC to the running app over a named pipe. Nothing here knows about ports,
-// so the client config a user puts in their project never goes stale:
-//
-//   { "command": "C:\\...\\bin\\JeekTokenPlanUsageMcp.exe" }
-//
-// The adapter lives beside the app, so it derives the same instance id from its
-// own folder and talks to the instance it shipped with — parallel Debug
-// worktrees stay separate.
+// Agents launch the fixed per-user copy. Debug launchers pass --app so routing
+// follows the requested worktree, independent of this executable location.
 
 var options = AdapterOptions.Parse(args);
 
@@ -177,7 +170,12 @@ internal sealed record AdapterOptions(
         }
 
         var baseDirectory = AppContext.BaseDirectory;
-        appPath ??= Path.Combine(baseDirectory, "JeekTokenPlanUsage.exe");
+        appPath ??= File.Exists(Path.Combine(baseDirectory, "JeekTokenPlanUsage.exe"))
+            ? Path.Combine(baseDirectory, "JeekTokenPlanUsage.exe")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs", "JeekTokenPlanUsage", "JeekTokenPlanUsage.exe");
+        appPath = Path.GetFullPath(appPath);
+        baseDirectory = Path.GetDirectoryName(appPath)!;
 
         // Release registers the bare pipe name, Debug suffixes the folder hash,
         // and the adapter cannot tell which build sits next to it — so try the
@@ -191,7 +189,8 @@ internal sealed record AdapterOptions(
         {
             var derived = McpPipeNames.Resolve(surface, instance ?? McpPipeNames.InstanceId(baseDirectory));
             var bare = McpPipeNames.Resolve(surface, null);
-            pipes = derived == bare ? [bare] : [derived, bare];
+            pipes = surface.Equals("debug", StringComparison.OrdinalIgnoreCase) || derived == bare
+                ? [derived] : [derived, bare];
         }
 
         // Debug worktrees are driven by a developer who already has the app

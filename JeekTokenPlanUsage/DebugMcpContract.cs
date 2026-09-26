@@ -9,6 +9,7 @@ internal static class DebugMcpContract
 {
     public static JsonArray BuildToolList() =>
     [
+        Tool("probe_adapter_installation", "Test first install, replacement with an open file, stale backup cleanup and timestamps in an isolated directory.", new JsonObject()),
         Tool(
             "probe_dependencies",
             "Verify managed/native SQLite loading and a parameterized Unicode read/write in a private in-memory database; returns versions and roundTrip. No credentials or live databases are accessed.",

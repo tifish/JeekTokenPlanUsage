@@ -1,11 +1,13 @@
 """Regression tests against this worktree's running Debug app (no real toasts)."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 
 
-ADAPTER = Path(__file__).resolve().parents[1] / "bin" / "JeekTokenPlanUsageMcp.exe"
+APP = Path(__file__).resolve().parents[1] / "bin" / "JeekTokenPlanUsage.exe"
+ADAPTER = Path(os.environ["LOCALAPPDATA"]) / "JeekTokenPlanUsage" / "Mcp" / "JeekTokenPlanUsageMcp.exe"
 CYCLE_A = "2026-09-22T12:00:00Z"
 CYCLE_B = "2026-09-22T17:00:00Z"
 
@@ -19,7 +21,7 @@ def sample(usage, reset=CYCLE_A, enabled=True):
 
 def rpc(surface, requests):
     completed = subprocess.run(
-        [str(ADAPTER), "--surface", surface, "--no-launch"],
+        [str(ADAPTER), "--surface", surface, "--app", str(APP), "--no-launch"],
         input="".join(json.dumps(request) + "\n" for request in requests),
         capture_output=True,
         text=True,

@@ -1,19 +1,5 @@
 @echo off
 setlocal
-
-set PROJECT_NAME=JeekTokenPlanUsage
-
-rem Stop any running instance, rebuild, then launch for testing.
-taskkill /f /im "%PROJECT_NAME%.exe" >nul 2>nul
-
-dotnet build --configuration Debug "%PROJECT_NAME%\%PROJECT_NAME%.csproj"
-if errorlevel 1 exit /b %errorlevel%
-
-rem The MCP stdio adapter is published (single-file) rather than built, so its
-rem runtimeconfig stays embedded and NetBeauty never patches it.
-dotnet publish --configuration Debug "Tools\%PROJECT_NAME%Mcp\%PROJECT_NAME%Mcp.csproj"
-if errorlevel 1 exit /b %errorlevel%
-
-start "" "bin\%PROJECT_NAME%.exe"
-
-endlocal
+cd /d "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Tools\Build.ps1" -Configuration Debug -Launch
+exit /b %errorlevel%
