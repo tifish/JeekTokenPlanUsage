@@ -321,4 +321,9 @@ Choose No to only change the setting and leave files in their current location.<
   <data name="Theme_System" xml:space="preserve"><value>Follow system</value></data>
   <data name="Theme_Light" xml:space="preserve"><value>Light</value></data>
   <data name="Theme_Dark" xml:space="preserve"><value>Dark</value></data>
+  <data name="Action_Move" xml:space="preserve"><value>Move files</value></data>
+  <data name="Action_UseLocation" xml:space="preserve"><value>Use new location</value></data>
+  <data name="Update_Ready" xml:space="preserve"><value>The update is ready. Restart and install now?</value></data>
+  <data name="Update_Install" xml:space="preserve"><value>Restart and install</value></data>
+  <data name="Update_Later" xml:space="preserve"><value>Later</value></data>
 </root>

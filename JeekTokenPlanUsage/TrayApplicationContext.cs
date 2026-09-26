@@ -7,7 +7,7 @@ using WinTimer = System.Windows.Forms.Timer;
 
 namespace JeekTokenPlanUsage;
 
-public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
+public sealed partial class TrayApplicationContext : ApplicationContext, IMcpUsageSource
 {
     // Allowed base polling intervals (minutes), shared across all providers.
     // Claude's fallback path may consume quota at the shorter end; 1 minute is
@@ -955,57 +955,6 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             SwitchStorageMode(SettingsStorageMode.Custom, dialog.SelectedPath);
     }
 
-    private void SwitchStorageMode(SettingsStorageMode mode, string? customRoot = null, bool showErrorDialog = true)
-    {
-        try
-        {
-            // Interactive switches ask whether to move the existing Config
-            // directory; MCP-driven switches (showErrorDialog == false) always
-            // move. Leaving portable mode must move regardless, or the Config
-            // dir next to the exe forces portable mode again on next start.
-            bool moveFiles = true;
-            string oldRoot = _settings.RoamingConfigDirectory;
-            string newRoot = _settings.PreviewConfigRoot(mode, customRoot);
-            if (showErrorDialog && !string.Equals(oldRoot, newRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                moveFiles = MessageBox.Show(
-                    string.Format(Strings.Storage_MoveConfigFormat, oldRoot, newRoot),
-                    Strings.Storage_MoveConfigTitle,
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question) == DialogResult.Yes;
-
-                if (!moveFiles
-                    && _settings.StorageMode == SettingsStorageMode.Portable
-                    && mode != SettingsStorageMode.Portable)
-                {
-                    if (MessageBox.Show(
-                            Strings.Storage_PortableMustMove,
-                            Strings.Storage_MoveConfigTitle,
-                            MessageBoxButtons.OKCancel,
-                            MessageBoxIcon.Information) != DialogResult.OK)
-                        return;
-                    moveFiles = true;
-                }
-            }
-
-            _settings.SwitchStorageMode(mode, customRoot, moveFiles);
-            StartSettingsWatcher();
-            UpdateStorageMenuChecks();
-            Log.Info($"Settings storage switched to {_settings.StorageMode}: {_settings.RoamingConfigDirectory}");
-        }
-        catch (Exception ex)
-        {
-            if (!showErrorDialog)
-                throw;
-
-            MessageBox.Show(
-                string.Format(Strings.Storage_SwitchFailedFormat, ex.Message),
-                "JeekTokenPlanUsage",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
-    }
-
     private void WireProxyMenu()
     {
         foreach (ToolStripItem raw in _proxyParent.DropDownItems)
@@ -1440,8 +1389,9 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 break;
 
             case "set_storage":
+                if (UserOperationBusy) throw new InvalidOperationException("Finish the current operation in the GUI first.");
                 SetStorageForMcp(request);
-                message = $"Storage set to {FormatStorageMode(_settings.StorageMode)}.";
+                message = _operation!.Message;
                 break;
 
             case "show_details":
@@ -1473,7 +1423,9 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 break;
 
             case "check_update":
-                message = await CheckUpdateForMcpAsync(request.AllowUpdateLaunch ?? false);
+                if (UserOperationBusy) throw new InvalidOperationException("Finish the current operation in the GUI first.");
+                _ = CheckForUpdatesAsync(manual: true);
+                message = _operation!.Message;
                 break;
 
             case "show_about":
@@ -1490,7 +1442,9 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
                 throw new ArgumentException($"Unknown UI action: {request.Action}");
         }
 
-        return new McpUiActionResult(DateTimeOffset.UtcNow, action, true, message, BuildMcpUiState());
+        return new McpUiActionResult(DateTimeOffset.UtcNow, action, true, message, BuildMcpUiState(),
+            action is "set_storage" or "check_update" ? _operation?.Status ?? "completed" : "completed",
+            action is "set_storage" or "check_update" ? _operation?.Id : null);
     }
 
     private McpUiState BuildMcpUiState() => new(
@@ -1498,6 +1452,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _detailsForm.Visible,
         _anchor.Visible,
         Log.FilePath,
+        _operation,
         new McpUiSettings(
             _paused,
             _settings.RunAtStartup,
@@ -1710,7 +1665,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
     private void SetStorageForMcp(McpUiActionRequest request)
     {
         SettingsStorageMode mode = ParseStorageMode(RequireString(request.Mode, "mode"));
-        SwitchStorageMode(mode, request.CustomRoot, showErrorDialog: false);
+        SwitchStorageMode(mode, request.CustomRoot);
     }
 
     private void ShowDetailsForMcp()
@@ -1719,37 +1674,6 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         if (entries.Count == 0)
             throw new InvalidOperationException("No providers are visible.");
         _detailsForm.ShowAt(Cursor.Position, entries);
-    }
-
-    private async Task<string> CheckUpdateForMcpAsync(bool allowUpdateLaunch)
-    {
-        if (_updateInProgress)
-            throw new InvalidOperationException("Update check is already in progress.");
-
-        _updateInProgress = true;
-        try
-        {
-            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync();
-            string message = outcome switch
-            {
-                UpdateCheckOutcome.Available => $"Update available: local={AutoUpdate.LocalCommitCount}, remote={AutoUpdate.RemoteCommitCount}.",
-                UpdateCheckOutcome.UpToDate => $"Up to date: local={AutoUpdate.LocalCommitCount}, remote={AutoUpdate.RemoteCommitCount}.",
-                UpdateCheckOutcome.Failed => $"Update check failed: {AutoUpdate.FailureReason}",
-                _ => outcome.ToString(),
-            };
-
-            if (allowUpdateLaunch && outcome == UpdateCheckOutcome.Available)
-            {
-                bool launched = await AutoUpdate.DownloadAndInstallAsync(_settings.DisableMirrorDownload);
-                message += launched ? " Updater launched." : $" Updater launch failed: {AutoUpdate.FailureReason}";
-            }
-
-            return message;
-        }
-        finally
-        {
-            _updateInProgress = false;
-        }
     }
 
     private void ShowAboutForMcp()
@@ -2274,70 +2198,6 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
         _grokAuthCredentialSignature = string.Empty;
     }
 
-    private async Task CheckForUpdatesAsync(bool manual)
-    {
-        if (_updateInProgress || _disposed || _paused)
-            return;
-        _updateInProgress = true;
-        try
-        {
-            Log.Info($"AutoUpdate check started (manual={manual})");
-            UpdateCheckOutcome outcome = await AutoUpdate.HasUpdateAsync();
-            if (_disposed)
-                return;
-
-            switch (outcome)
-            {
-                case UpdateCheckOutcome.Available:
-                    string body = string.Format(
-                        Strings.Update_FoundBodyFormat,
-                        AutoUpdate.RemoteCommitCount > 0 ? AutoUpdate.RemoteCommitCount.ToString() : "?");
-                    ShowUpdateToast(Strings.Update_FoundTitle, body);
-                    // Give the toast a moment to render before the download runs
-                    // and the process exits.
-                    await Task.Delay(800);
-                    if (_disposed)
-                        return;
-                    bool launched = await AutoUpdate.DownloadAndInstallAsync(_settings.DisableMirrorDownload);
-                    if (!launched && manual)
-                    {
-                        ShowUpdateToast(
-                            Strings.Update_NoneTitle,
-                            string.Format(Strings.Update_FailedFormat, "launch failed"));
-                    }
-                    break;
-
-                case UpdateCheckOutcome.UpToDate when manual:
-                    ShowUpdateToast(Strings.Update_NoneTitle, Strings.Update_NoneBody);
-                    break;
-
-                case UpdateCheckOutcome.Failed when manual:
-                    // Surface failure to the user — they pressed the button and
-                    // deserve to know the check didn't actually conclude. Auto
-                    // checks stay silent (already logged) to avoid nagging.
-                    ShowUpdateToast(
-                        Strings.Update_NoneTitle,
-                        string.Format(Strings.Update_FailedFormat,
-                            string.IsNullOrEmpty(AutoUpdate.FailureReason) ? "unknown" : AutoUpdate.FailureReason));
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"AutoUpdate check threw: {ex.Message}");
-            if (manual)
-            {
-                ShowUpdateToast(
-                    Strings.Update_NoneTitle,
-                    string.Format(Strings.Update_FailedFormat, ex.Message));
-            }
-        }
-        finally
-        {
-            _updateInProgress = false;
-        }
-    }
-
     private void ShowUpdateToast(string title, string body)
     {
         // Route the toast through whichever icon is currently visible.
@@ -2508,6 +2368,7 @@ public sealed class TrayApplicationContext : ApplicationContext, IMcpUsageSource
             _anchor.Visible = false;
             _anchor.Dispose();
             _anchorIcon?.Dispose();
+            _confirmationForm?.Close();
             _aboutForm?.Dispose();
             _detailsForm.Dispose();
             _taskbarWidget.Dispose();

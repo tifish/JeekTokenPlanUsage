@@ -14,6 +14,12 @@ internal static class Strings
     private static string Get(string key) =>
         Rm.GetString(key, CultureInfo.CurrentUICulture) ?? key;
 
+    public static string Action_Move => Get(nameof(Action_Move));
+    public static string Action_UseLocation => Get(nameof(Action_UseLocation));
+    public static string Update_Ready => Get(nameof(Update_Ready));
+    public static string Update_Install => Get(nameof(Update_Install));
+    public static string Update_Later => Get(nameof(Update_Later));
+
     public static string Menu_Theme => Get(nameof(Menu_Theme));
     public static string Theme_System => Get(nameof(Theme_System));
     public static string Theme_Light => Get(nameof(Theme_Light));

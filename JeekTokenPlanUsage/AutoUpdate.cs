@@ -30,6 +30,8 @@ public static class AutoUpdate
         AppExeName = "JeekTokenPlanUsage.exe",
         ReleaseZipUrl = ReleaseZipUrl,
         VersionTxtUrl = VersionTxtUrl,
+        UpdateRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "JeekTokenPlanUsage", "Update"),
         UserAgent = "JeekTokenPlanUsage-Updater/1.0",
         // Debug builds never self-update. Release dev builds are additionally
         // protected by the version sentinel: csproj bakes 0.0.0.0 unless CI
@@ -53,22 +55,10 @@ public static class AutoUpdate
     /// exists. Never throws; failures come back as UpdateCheckOutcome.Failed.
     public static Task<UpdateCheckOutcome> HasUpdateAsync() => Updater.HasUpdateAsync();
 
-    /// Downloads and stages the release zip, launches AutoUpdate.ps1, and asks
-    /// the app to exit so the script can replace the executable. When
-    /// disableMirror is true the download skips GitHub mirrors and goes to
-    /// github.com directly.
-    public static async Task<bool> DownloadAndInstallAsync(bool disableMirror)
-    {
-        string[]? urls = disableMirror ? [ReleaseZipUrl] : null;
-        string? stagedDir = await Updater.DownloadAndStageAsync(urls);
-        if (stagedDir is null)
-            return false;
+    public static string UpdateRoot => Updater.UpdateRoot;
 
-        if (!Updater.LaunchInstall(stagedDir))
-            return false;
+    public static Task<string?> DownloadAsync(bool disableMirror) =>
+        Updater.DownloadAndStageAsync(disableMirror ? [ReleaseZipUrl] : null);
 
-        Log.Info("AutoUpdate: launched updater; exiting");
-        Application.Exit();
-        return true;
-    }
+    public static bool LaunchInstall(string package) => Updater.LaunchInstall(package);
 }

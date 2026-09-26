@@ -44,4 +44,4 @@
 ## 产品接口的安全边界
 
 - 不暴露 access token、凭据文件内容或 provider 原始响应；返回体是显式字段白名单（`McpModels.cs` 里的 record）。
-- 需要用户参与的操作只在 GUI 完成；`check_update` 默认不启动更新器（`allowUpdateLaunch` 显式开）。
+- `set_storage` 和 `check_update` 返回操作 id/status；使用 `get_ui_state.operation` 轮询。迁移与安装确认在非模态 GUI 中完成，状态为 `awaiting_user`。`allowUpdateLaunch` 仅保留兼容，不能绕过确认。

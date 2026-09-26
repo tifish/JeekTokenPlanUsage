@@ -83,7 +83,9 @@ the updated snapshot.
 ### `get_ui_state`
 
 Returns the current tray UI and settings state: `detailsVisible`,
-`anchorVisible`, `logPath`, `settings`, `allowedValues`.
+`anchorVisible`, `logPath`, `settings`, `allowedValues`, and the latest `operation`
+(id, action, status, message). Poll the operation until completed, cancelled, postponed or failed.
+`awaiting_user` means the active GUI confirmation needs the user; tools cannot approve it.
 
 ### `ui_action`
 
@@ -106,12 +108,12 @@ Invokes a tray-menu-equivalent action on the UI thread.
 | `set_storage` | `mode`: `appData`, `portable`, `custom`; optional `customRoot` |
 | `show_details` / `hide_details` / `toggle_details` | none |
 | `open_log` | none |
-| `check_update` | optional `allowUpdateLaunch`, default `false` |
+| `check_update` | prepare the update, then request GUI confirmation |
 | `show_about` | none |
 | `exit_app` | none |
 
-`check_update` does not launch the updater unless `allowUpdateLaunch` is
-`true`, so automated tests can inspect update status safely.
+`check_update` always requires GUI confirmation. The legacy `allowUpdateLaunch`
+argument is ignored and cannot authorize installation.
 
 ## Debug Tools (Debug builds only)
 
@@ -161,3 +163,6 @@ Product tool results include `structuredContent`:
 
 The MCP interface does not expose access tokens, credential file contents, or
 raw provider responses.
+
+Storage changes and update checks return `status` and `operationId` immediately.
+The legacy `allowUpdateLaunch` field is ignored; it never bypasses GUI confirmation.

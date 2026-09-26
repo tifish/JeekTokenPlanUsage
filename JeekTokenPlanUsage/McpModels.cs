@@ -36,6 +36,7 @@ internal sealed record McpUiState(
     bool DetailsVisible,
     bool AnchorVisible,
     string LogPath,
+    McpOperationState? Operation,
     McpUiSettings Settings,
     McpUiAllowedValues AllowedValues);
 
@@ -96,4 +97,8 @@ internal sealed record McpUiActionResult(
     string Action,
     bool Succeeded,
     string Message,
-    McpUiState State);
+    McpUiState State,
+    string Status = "completed",
+    string? OperationId = null);
+
+internal sealed record McpOperationState(string Id, string Action, string Status, string Message);

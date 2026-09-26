@@ -339,6 +339,15 @@ internal sealed class AppSettings
         string newRoamingConfigDirectory = Storage.ResolveConfigRoot(ToLocation(mode), effectiveCustomRoot);
         string newRoamingSettingsPath = Storage.ResolveSettingsPath(ToLocation(mode), effectiveCustomRoot);
 
+        RoamingSettingsFile? destinationSettings = null;
+        if (!moveFiles && !leavingPortable)
+        {
+            if (!JsonSettingsFile.TryLoad(newRoamingSettingsPath, out RoamingSettingsFile destination)
+                && File.Exists(newRoamingSettingsPath))
+                throw new IOException("Destination settings are unreadable or invalid.");
+            destinationSettings = destination;
+        }
+
         if (!SamePath(oldRoamingConfigDirectory, newRoamingConfigDirectory)
             && (moveFiles || leavingPortable))
         {
@@ -357,24 +366,32 @@ internal sealed class AppSettings
             CustomStorageRoot = customRoot!;
         _roamingConfigDirectory = newRoamingConfigDirectory;
         _roamingSettingsPath = newRoamingSettingsPath;
-        Save();
+        if (!moveFiles && !leavingPortable)
+        {
+            // Use the destination's settings without copying the previous preferences over it.
+            ApplyRoamingSettings(destinationSettings!);
+            _roamingBaseline = JsonSettingsFile.Clone(destinationSettings!);
+            if (!SaveMachine()) throw new IOException("Could not save the storage location.");
+        }
+        else if (!Save()) throw new IOException("Could not save settings after migration.");
     }
 
-    public void Save()
+    private bool SaveMachine()
     {
-        MachineSettingsFile machine = CaptureMachineSettings();
-        if (JsonSettingsFile.TryMergeAndWrite(
-                Storage.MachineSettingsPath, _machineBaseline, machine,
-                static _ => { }, forceAllLocal: false, out MachineSettingsFile mergedMachine))
-            _machineBaseline = mergedMachine;
+        bool saved = JsonSettingsFile.TryMergeAndWrite(Storage.MachineSettingsPath, _machineBaseline,
+            CaptureMachineSettings(), static _ => { }, false, out MachineSettingsFile merged);
+        if (saved) _machineBaseline = merged;
+        return saved;
+    }
 
-        RoamingSettingsFile roaming = RoamingSettingsFile.From(this);
-        bool forceAllLocal = !File.Exists(_roamingSettingsPath);
-        if (JsonSettingsFile.TryMergeAndWrite(
-                _roamingSettingsPath, _roamingBaseline, roaming,
-                static _ => { }, forceAllLocal, out RoamingSettingsFile mergedRoaming))
-            _roamingBaseline = mergedRoaming;
-
+    public bool Save()
+    {
+        bool machineSaved = SaveMachine();
+        bool roamingSaved = JsonSettingsFile.TryMergeAndWrite(_roamingSettingsPath, _roamingBaseline,
+            RoamingSettingsFile.From(this), static _ => { }, !File.Exists(_roamingSettingsPath), out RoamingSettingsFile merged);
+        if (roamingSaved) _roamingBaseline = merged;
+        if (!machineSaved || !roamingSaved) Log.Warn("Could not persist all settings files.");
+        return machineSaved && roamingSaved;
     }
 
     private static string? PeekLanguageFromPath(string path)

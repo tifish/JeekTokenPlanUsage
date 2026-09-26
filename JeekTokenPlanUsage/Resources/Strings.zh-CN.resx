@@ -321,4 +321,9 @@
   <data name="Theme_System" xml:space="preserve"><value>跟随系统</value></data>
   <data name="Theme_Light" xml:space="preserve"><value>亮色</value></data>
   <data name="Theme_Dark" xml:space="preserve"><value>暗色</value></data>
+  <data name="Action_Move" xml:space="preserve"><value>移动文件</value></data>
+  <data name="Action_UseLocation" xml:space="preserve"><value>使用新位置</value></data>
+  <data name="Update_Ready" xml:space="preserve"><value>更新已准备就绪，是否立即重启并安装？</value></data>
+  <data name="Update_Install" xml:space="preserve"><value>重启并安装</value></data>
+  <data name="Update_Later" xml:space="preserve"><value>稍后</value></data>
 </root>

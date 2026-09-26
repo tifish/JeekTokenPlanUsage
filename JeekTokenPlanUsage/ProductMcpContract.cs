@@ -32,7 +32,7 @@ internal static class ProductMcpContract
             }),
         Tool(
             "get_ui_state",
-            "Return the tray app's current UI and settings state for automation.",
+            "Return UI, settings and the latest operation status (poll its id until completed, postponed, cancelled or failed).",
             new JsonObject()),
         Tool(
             "ui_action",
@@ -75,7 +75,7 @@ internal static class ProductMcpContract
                 {
                     ["type"] = "boolean",
                     ["default"] = false,
-                    ["description"] = "When true, check_update may launch the updater if one is available.",
+                    ["description"] = "Deprecated compatibility field; check_update always prepares the package and asks the user in the GUI before installation.",
                 },
             },
             required: ["action"]),
