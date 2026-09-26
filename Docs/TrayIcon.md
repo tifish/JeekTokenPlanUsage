@@ -22,7 +22,7 @@
 较早的旧时间戳以及用量回落都不会清空记录。状态目前只保存在内存，重启程序会重新提醒。
 
 Debug MCP 的 `probe_threshold_notifications` 使用相同逻辑回放数据，不发送实际通知；
-启动当前工作区的 Debug 程序后，运行 `python Tools/test_threshold_notifications.py` 验证。
+启动当前工作区的 Debug 程序后，运行 `python Tools/TestThresholdNotifications.py` 验证。
 
 ### 每个图标一个固定 GUID
 

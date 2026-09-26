@@ -120,7 +120,7 @@ OAuth 返回正常数据 → 冷却立即清除，streak 衰减 1 级（不清�
 
 ## 诊断日志
 
-Claude 刷新链路会把关键状态写入 `%TEMP%\JeekTokenPlanUsage.log`，文件超过 512KB 时轮转为 `.old`。日志只记录端点状态码、进程退出码/超时、凭据来源类型、WSL distro 名和解析错误，不记录 access token、请求 payload 或凭据文件内容。
+Claude 刷新链路会把关键状态写入 `%LocalAppData%\JeekTokenPlanUsage\Logs\`，日志按 1MB 滚动并保留 7 天。日志只记录端点状态码、进程退出码/超时、凭据来源类型、WSL distro 名和解析错误，不记录 access token、请求 payload 或凭据文件内容。
 
 ## 轮询节奏
 

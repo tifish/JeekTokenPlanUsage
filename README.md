@@ -51,4 +51,4 @@ Requires the .NET 10 SDK. `Build.cmd` is the Release ship script into `bin\`;
 ## License
 
 See [JeekTools.NET](https://github.com/tifish/JeekTools.NET) for the shared
-library. Provider docs live in [docs/](docs/).
+library. Provider docs live in [Docs/](Docs/).

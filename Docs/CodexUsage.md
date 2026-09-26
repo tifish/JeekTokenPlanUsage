@@ -119,4 +119,4 @@ HTTPSTATUS:200
 
 ## 诊断日志
 
-Codex 401 恢复链路会写入 `%TEMP%\JeekTokenPlanUsage.log`，只记录 HTTP 状态、curl/CLI 退出码、超时、auth 路径状态和 CLI 路径解析状态，不记录 access token 或 curl stdin 配置内容。
+Codex 401 恢复链路会写入 `%LocalAppData%\JeekTokenPlanUsage\Logs\`，只记录 HTTP 状态、curl/CLI 退出码、超时、auth 路径状态和 CLI 路径解析状态，不记录 access token 或 curl stdin 配置内容。

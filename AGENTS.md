@@ -34,13 +34,13 @@ See [bin/MCP.md](bin/MCP.md) for tool usage.
 
 ## 参考
 
-每个 provider 的实现说明见 [docs/](docs/)：
+每个 provider 的实现说明见 [Docs/](Docs/)：
 
-- [Claude 用量获取](docs/claude-usage.md)
-- [Codex 用量获取](docs/codex-usage.md)
-- [Cursor 用量获取](docs/cursor-usage.md)
-- [Grok 用量获取](docs/grok-usage.md)
-- [自动更新](docs/auto-update.md)
-- [MCP 接口](docs/mcp.md)
-- [托盘图标实现](docs/tray-icon.md)
-- [任务栏组件实现](docs/taskbar-widget.md)
+- [Claude 用量获取](Docs/ClaudeUsage.md)
+- [Codex 用量获取](Docs/CodexUsage.md)
+- [Cursor 用量获取](Docs/CursorUsage.md)
+- [Grok 用量获取](Docs/GrokUsage.md)
+- [自动更新](Docs/AutoUpdate.md)
+- [MCP 接口](Docs/Mcp.md)
+- [托盘图标实现](Docs/TrayIcon.md)
+- [任务栏组件实现](Docs/TaskbarWidget.md)

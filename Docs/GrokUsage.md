@@ -146,4 +146,4 @@ CLI 自己走的是 `cli-chat-proxy.grok.com/v1/billing`，与日志里的 `bill
 
 ## 诊断日志
 
-写入 `%TEMP%\JeekTokenPlanUsage.log`，只记录 HTTP 状态、OIDC/CLI 刷新结果、auth 路径状态，不记录 access token 或 refresh token。
+写入 `%LocalAppData%\JeekTokenPlanUsage\Logs\`，只记录 HTTP 状态、OIDC/CLI 刷新结果、auth 路径状态，不记录 access token 或 refresh token。

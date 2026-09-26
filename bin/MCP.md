@@ -136,7 +136,7 @@ notifications or change live state.
 Usage at or above 100% is silent and consumes the current cycle's thresholds;
 80% / 95% alerts are re-armed only when the reset time advances by more than
 one minute from the cycle anchor. Jitter, missing resets, and older timestamps
-do not re-arm alerts. Run `python Tools/test_threshold_notifications.py`
+do not re-arm alerts. Run `python Tools/TestThresholdNotifications.py`
 against the running Debug build to verify this policy.
 
 ## Response Shape

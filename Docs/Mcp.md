@@ -45,3 +45,14 @@
 
 - 不暴露 access token、凭据文件内容或 provider 原始响应；返回体是显式字段白名单（`McpModels.cs` 里的 record）。
 - `set_storage` 和 `check_update` 返回操作 id/status；使用 `get_ui_state.operation` 轮询。迁移与安装确认在非模态 GUI 中完成，状态为 `awaiting_user`。`allowUpdateLaunch` 仅保留兼容，不能绕过确认。
+
+## 回归验证
+
+运行 `Run.cmd` 启动当前工作区 Debug 程序后，执行：
+
+```powershell
+python Tools/TestAppRules.py
+python Tools/TestThresholdNotifications.py
+```
+
+前者验证固定适配器安装、隔离自启快捷方式、主题、配置监听防抖以及非模态确认；更新只测试 Debug 预览，不下载或安装真实版本。
