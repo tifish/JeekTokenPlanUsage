@@ -60,6 +60,8 @@ internal static class DebugMcpServer
             Task.FromResult(ProbeThresholdNotifications(args)));
         host.AddTool("probe_dependencies", _ => Task.FromResult(ProbeDependencies()));
         host.AddTool("probe_adapter_installation", _ => Task.FromResult(ProbeAdapterInstallation()));
+        host.AddTool("probe_startup_shortcut", _ => InvokeOnUiAsync(ProbeStartupShortcut)
+            .ContinueWith(task => (JsonObject)task.GetAwaiter().GetResult()!));
 
         host.Start();
         _host = host;
@@ -72,6 +74,26 @@ internal static class DebugMcpServer
         _host?.Stop();
         _host = null;
         _uiContext = null;
+    }
+
+    private static JsonObject ProbeStartupShortcut()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JeekStartupProbe-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(root, "Startup.lnk");
+        try
+        {
+            string executable = Environment.ProcessPath!;
+            StartupRegistration.WriteShortcut(path, executable);
+            bool matches = StartupRegistration.PointsToExecutable(path, executable);
+            bool isolated = !StartupRegistration.PointsToExecutable(path, Path.Combine(root, "Other.exe"));
+            File.Delete(path);
+            bool removed = !StartupRegistration.PointsToExecutable(path, executable);
+            var data = new JsonObject { ["matches"] = matches, ["pathIsolation"] = isolated, ["removed"] = removed };
+            return new JsonObject { ["structuredContent"] = data,
+                ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = data.ToJsonString() }),
+                ["isError"] = !(matches && isolated && removed) };
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
     private static JsonObject ProbeAdapterInstallation()

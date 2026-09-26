@@ -1,6 +1,5 @@
 using System.Text.Json;
 using JeekTools;
-using Microsoft.Win32;
 using System.Text.Json.Serialization;
 
 namespace JeekTokenPlanUsage;
@@ -41,8 +40,6 @@ public enum SettingsStorageMode
 internal sealed class AppSettings
 {
     private const string AppName = "JeekTokenPlanUsage";
-    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunKeyName = "JeekTokenPlanUsage";
 
     /// JeekTools path scheme: machine settings always live under
     /// %LocalAppData%\<App>\Config\settings.json; roaming settings live in the
@@ -191,24 +188,9 @@ internal sealed class AppSettings
     [JsonIgnore]
     public bool RunAtStartup
     {
-        get
-        {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath);
-            return key?.GetValue(RunKeyName) is string;
-        }
-        set
-        {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-            if (key is null)
-                return;
-            if (value)
-                key.SetValue(RunKeyName, ExePath);
-            else
-                key.DeleteValue(RunKeyName, throwOnMissingValue: false);
-        }
+        get => StartupRegistration.Enabled;
+        set => StartupRegistration.Enabled = value;
     }
-
-    private static string ExePath => $"\"{Environment.ProcessPath ?? Application.ExecutablePath}\"";
 
     /// Side-effect-free read of just the Language field, used at startup before
     /// any WinForms code (and before any provider credential probing in Load).

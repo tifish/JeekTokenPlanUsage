@@ -9,6 +9,7 @@ internal static class DebugMcpContract
 {
     public static JsonArray BuildToolList() =>
     [
+        Tool("probe_startup_shortcut", "Create, inspect and remove an isolated startup shortcut without changing the user's startup entries.", new JsonObject()),
         Tool("probe_adapter_installation", "Test first install, replacement with an open file, stale backup cleanup and timestamps in an isolated directory.", new JsonObject()),
         Tool(
             "probe_dependencies",

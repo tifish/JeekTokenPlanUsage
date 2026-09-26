@@ -1,11 +1,11 @@
-# JeekTokenPlanUsage one-click installer.
+﻿# JeekTokenPlanUsage one-click installer.
 # Usage:
 #   irm https://raw.githubusercontent.com/tifish/JeekTokenPlanUsage/main/install.ps1 | iex
 # Mirror for mainland China:
 #   irm https://ghfast.top/https://raw.githubusercontent.com/tifish/JeekTokenPlanUsage/main/install.ps1 | iex
 #
 # No registry writes. To uninstall: quit the app, delete
-# %LOCALAPPDATA%\Programs\JeekTokenPlanUsage and the Start Menu shortcut.
+# %LOCALAPPDATA%\Programs\JeekTokenPlanUsage and the Start Menu/Startup shortcuts.
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -166,6 +166,14 @@ $shortcut = $shell.CreateShortcut($ShortcutPath)
 $shortcut.TargetPath = Join-Path $InstallDir "$AppName.exe"
 $shortcut.WorkingDirectory = $InstallDir
 $shortcut.Save()
+
+# Register startup through a shortcut, not the registry. The tray menu manages
+# this same shortcut so the installer and the app cannot disagree about state.
+$StartupPath = Join-Path ([Environment]::GetFolderPath('Startup')) "$AppName.lnk"
+$startupShortcut = $shell.CreateShortcut($StartupPath)
+$startupShortcut.TargetPath = Join-Path $InstallDir "$AppName.exe"
+$startupShortcut.WorkingDirectory = $InstallDir
+$startupShortcut.Save()
 
 # 6. Start the app; if the .NET Desktop runtime is missing, Setup.cmd installs
 #    it (elevated) and then starts the app itself. Run-at-startup is a setting

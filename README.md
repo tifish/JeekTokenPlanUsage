@@ -32,8 +32,9 @@ irm https://ghfast.top/https://raw.githubusercontent.com/tifish/JeekTokenPlanUsa
 ```
 
 The app is installed to `%LOCALAPPDATA%\Programs\JeekTokenPlanUsage` with a
-Start Menu shortcut. No registry entries are written; to uninstall, quit the
-app and delete the install directory and the shortcut. If the .NET 10 Desktop
+Start Menu shortcut and a Startup shortcut. Disable automatic startup from
+the tray menu. The installer writes no registry entries; to uninstall, quit
+the app and delete the install directory and both shortcuts. If the .NET 10 Desktop
 runtime is missing, the bundled `Setup.cmd` installs it automatically.
 
 ## Building from source
